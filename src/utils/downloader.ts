@@ -14,7 +14,8 @@ if (ffmpegStatic) {
     ffmpeg.setFfmpegPath(ffmpegStatic);
 }
 
-const YTDLP_PATH = path.join(process.cwd(), 'yt-dlp.exe');
+const YTDLP_FILENAME = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+const YTDLP_PATH = path.join(process.cwd(), YTDLP_FILENAME);
 
 const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR
     ? path.resolve(process.env.DOWNLOAD_DIR)

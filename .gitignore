@@ -3,4 +3,5 @@ dist
 downloads
 .env
 server.log
+yt-dlp
 yt-dlp.exe
