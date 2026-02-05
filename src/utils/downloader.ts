@@ -4,7 +4,6 @@ import { promisify } from 'util';
 import { execFile } from 'child_process';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
-// @ts-ignore
 import scdl from 'soundcloud-downloader';
 
 const execFileAsync = promisify(execFile);
@@ -27,7 +26,10 @@ if (!fs.existsSync(DOWNLOAD_DIR)) {
 
 export enum SourceType {
     YOUTUBE = 'youtube',
-    SOUNDCLOUD = 'soundcloud'
+    SOUNDCLOUD = 'soundcloud',
+    SPOTIFY = 'spotify',
+    DEEZER = 'deezer',
+    APPLE_MUSIC = 'apple_music'
 }
 
 export interface TrackMetadata {
@@ -76,6 +78,54 @@ const parseArtistsTitle = (fullTitle: string, uploaderName: string): { title: st
         .replace(/\(^\)/g, '').trim();
 
     return { title, artists };
+};
+
+const getSpotifyAccessToken = async (): Promise<string> => {
+    const clientId = process.env.SPOTIFY_CLIENT_ID;
+    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+        throw new Error('SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET is missing in .env');
+    }
+
+    const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: 'grant_type=client_credentials'
+    });
+
+    if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Failed to get Spotify access token: ${error}`);
+    }
+
+    const data: any = await response.json();
+    return data.access_token;
+};
+
+const getSpotifyTrackInfo = async (trackId: string): Promise<TrackMetadata> => {
+    const token = await getSpotifyAccessToken();
+    const response = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Failed to fetch Spotify track: ${error}`);
+    }
+
+    const track: any = await response.json();
+    return {
+        title: track.name,
+        artists: track.artists.map((a: any) => a.name),
+        coverUrl: track.album.images[0]?.url || '',
+        source: SourceType.SPOTIFY,
+        _raw: track
+    };
 };
 
 const validateCookies = (cookies: any[]): boolean => {
@@ -169,8 +219,34 @@ export const getTrackInfo = async (url: string, cookies?: any[]): Promise<TrackM
             source: SourceType.SOUNDCLOUD,
             _raw: info
         };
+    } else if (url.includes('spotify.com')) {
+        const trackIdMatch = url.match(/track\/([a-zA-Z0-9]+)/);
+        if (!trackIdMatch) throw new Error("Invalid Spotify track URL");
+        const trackId = trackIdMatch[1];
+        console.log(`[Spotify] Fetching metadata for track ID: ${trackId}`);
+        return await getSpotifyTrackInfo(trackId);
+    } else if (url.includes('deezer.com')) {
+        console.log(`[Deezer] Fetching metadata with yt-dlp`);
+        const info = await executeYtDlp(url);
+        return {
+            title: info.track || info.title,
+            artists: info.artist ? [info.artist] : [],
+            coverUrl: info.thumbnail || '',
+            source: SourceType.DEEZER,
+            _raw: info
+        };
+    } else if (url.includes('music.apple.com')) {
+        console.log(`[Apple Music] Fetching metadata with yt-dlp`);
+        const info = await executeYtDlp(url);
+        return {
+            title: info.track || info.title,
+            artists: info.artist ? [info.artist] : [],
+            coverUrl: info.thumbnail || '',
+            source: SourceType.APPLE_MUSIC,
+            _raw: info
+        };
     }
-    throw new Error("Unsupported URL. Only YouTube and SoundCloud are supported.");
+    throw new Error("Unsupported URL. YouTube, SoundCloud, Spotify, Deezer and Apple Music are supported.");
 };
 
 export const downloadMedia = async (url: string, cookies?: any[], overrides?: { title?: string, artists?: string[] }): Promise<DownloadResult> => {
@@ -251,6 +327,49 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
             if (cookiesFile && fs.existsSync(cookiesFile)) {
                 fs.unlinkSync(cookiesFile);
             }
+        }
+    } else if (metadata.source === SourceType.SPOTIFY || metadata.source === SourceType.DEEZER || metadata.source === SourceType.APPLE_MUSIC) {
+        // Search on YouTube and download
+        const query = `${metadata.artists.join(' ')} - ${metadata.title}`;
+        console.log(`[Search] Searching YouTube for: ${query} (${metadata.source})`);
+        const searchUrl = `ytsearch1:${query}`;
+
+        const tempBasePath = path.join(DOWNLOAD_DIR, `temp-${Date.now()}`);
+        const ytdlpArgs = [
+            '-f', 'bestaudio',
+            '--output', `${tempBasePath}.%(ext)s`,
+            '--no-playlist'
+        ];
+
+        if (ffmpegStatic) {
+            ytdlpArgs.push('--ffmpeg-location', ffmpegStatic);
+        }
+
+        try {
+            await execFileAsync(YTDLP_PATH, [...ytdlpArgs, searchUrl]);
+
+            const files = fs.readdirSync(DOWNLOAD_DIR).filter(f => f.startsWith(`temp-`) && f.includes(tempBasePath.split(path.sep).pop()!));
+            if (files.length === 0) {
+                throw new Error('Search result download failed');
+            }
+            const tempAudioPath = path.join(DOWNLOAD_DIR, files[0]);
+
+            await new Promise<void>((resolve, reject) => {
+                ffmpeg(tempAudioPath)
+                    .audioBitrate(320)
+                    .save(mp3Path)
+                    .outputOptions('-metadata', `title=${metadata.title}`)
+                    .outputOptions('-metadata', `artist=${artistString}`)
+                    .on('end', () => resolve())
+                    .on('error', (err) => reject(err));
+            });
+
+            if (fs.existsSync(tempAudioPath)) {
+                fs.unlinkSync(tempAudioPath);
+            }
+        } catch (e) {
+            console.error("Spotify search/download failed:", e);
+            throw e;
         }
     } else {
         // SoundCloud: keep existing stream-based approach
