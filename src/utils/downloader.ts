@@ -15,12 +15,15 @@ if (ffmpegStatic) {
 
 const YTDLP_FILENAME = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
 const YTDLP_PATH = path.join(process.cwd(), YTDLP_FILENAME);
-const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR
-    ? path.resolve(process.env.DOWNLOAD_DIR)
-    : path.join(process.cwd(), 'downloads');
+const MP3_DIR = path.resolve(process.env.MP3_DOWNLOAD_DIR ?? '')
+const COVER_DIR = path.resolve(process.env.COVER_DOWNLOAD_DIR ?? '')
 
-if (!fs.existsSync(DOWNLOAD_DIR)) {
-    fs.mkdirSync(DOWNLOAD_DIR);
+if (!fs.existsSync(MP3_DIR)) {
+    throw new Error(`MP3 download directory not found: ${MP3_DIR}. Please create it manually.`);
+}
+
+if (!fs.existsSync(COVER_DIR)) {
+    throw new Error(`Cover download directory not found: ${COVER_DIR}. Please create it manually.`);
 }
 
 
@@ -230,6 +233,14 @@ export const getTrackInfo = async (url: string, cookies?: any[]): Promise<TrackM
 };
 
 export const downloadMedia = async (url: string, cookies?: any[], overrides?: { title?: string, artists?: string[] }): Promise<DownloadResult> => {
+    if (!fs.existsSync(MP3_DIR)) {
+        throw new Error(`MP3 download directory not found: ${MP3_DIR}. Please create it manually.`);
+    }
+
+    if (!fs.existsSync(COVER_DIR)) {
+        throw new Error(`Cover download directory not found: ${COVER_DIR}. Please create it manually.`);
+    }
+
     const metadata = await getTrackInfo(url, cookies);
 
     if (overrides) {
@@ -239,8 +250,8 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
 
     const artistString = metadata.artists.join(', ');
     const filenameBase = sanitizeFilename(`${metadata.title}-${artistString}`);
-    const mp3Path = path.join(DOWNLOAD_DIR, `${filenameBase}.mp3`);
-    const coverPath = path.join(DOWNLOAD_DIR, `${filenameBase}.jpg`);
+    const mp3Path = path.join(MP3_DIR, `${filenameBase}.mp3`);
+    const coverPath = path.join(COVER_DIR, `${filenameBase}.jpg`);
 
     if (metadata.coverUrl) {
         try {
@@ -251,7 +262,7 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
     }
 
     if (metadata.source === SourceType.YOUTUBE) {
-        const tempBasePath = path.join(DOWNLOAD_DIR, `temp-${Date.now()}`);
+        const tempBasePath = path.join(MP3_DIR, `temp-${Date.now()}`);
         const ytdlpArgs = [
             '-f', 'bestaudio',
             '--output', `${tempBasePath}.%(ext)s`,
@@ -275,11 +286,11 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
         try {
             await execFileAsync(YTDLP_PATH, [...ytdlpArgs, url]);
 
-            const files = fs.readdirSync(DOWNLOAD_DIR).filter(f => f.startsWith(`temp-`) && f.includes(tempBasePath.split(path.sep).pop()!));
+            const files = fs.readdirSync(MP3_DIR).filter(f => f.startsWith(`temp-`) && f.includes(tempBasePath.split(path.sep).pop()!));
             if (files.length === 0) {
                 throw new Error('Downloaded audio file not found');
             }
-            const tempAudioPath = path.join(DOWNLOAD_DIR, files[0]);
+            const tempAudioPath = path.join(MP3_DIR, files[0]);
 
             await new Promise<void>((resolve, reject) => {
                 ffmpeg(tempAudioPath)
@@ -304,7 +315,7 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
         console.log(`[Search] Searching YouTube for: ${query} (${metadata.source})`);
         const searchUrl = `ytsearch1:${query}`;
 
-        const tempBasePath = path.join(DOWNLOAD_DIR, `temp-${Date.now()}`);
+        const tempBasePath = path.join(MP3_DIR, `temp-${Date.now()}`);
         const ytdlpArgs = [
             '-f', 'bestaudio',
             '--output', `${tempBasePath}.%(ext)s`,
@@ -318,11 +329,11 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
         try {
             await execFileAsync(YTDLP_PATH, [...ytdlpArgs, searchUrl]);
 
-            const files = fs.readdirSync(DOWNLOAD_DIR).filter(f => f.startsWith(`temp-`) && f.includes(tempBasePath.split(path.sep).pop()!));
+            const files = fs.readdirSync(MP3_DIR).filter(f => f.startsWith(`temp-`) && f.includes(tempBasePath.split(path.sep).pop()!));
             if (files.length === 0) {
                 throw new Error('Search result download failed');
             }
-            const tempAudioPath = path.join(DOWNLOAD_DIR, files[0]);
+            const tempAudioPath = path.join(MP3_DIR, files[0]);
 
             await new Promise<void>((resolve, reject) => {
                 ffmpeg(tempAudioPath)

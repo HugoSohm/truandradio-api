@@ -22,6 +22,22 @@ API for retrieving information, downloading media, and grabbing cover art from v
    npm install
    ```
 3. Configure environment variables in a `.env` file (see `.env.sample`)
+4. **Create the download directories manually** (see [Configuration](#-configuration))
+
+## ⚙️ Configuration
+
+The following environment variables are available:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | The port the server will listen on | `3000` |
+| `MP3_DOWNLOAD_DIR` | Directory where MP3 files will be stored | `mp3` |
+| `COVER_DOWNLOAD_DIR` | Directory where cover images will be stored | `covers` |
+| `SPOTIFY_CLIENT_ID` | Your Spotify Application Client ID | - |
+| `SPOTIFY_CLIENT_SECRET` | Your Spotify Application Client Secret | - |
+
+> [!IMPORTANT]
+> **Strict Directory Validation**: The server will fail to start if the directories specified in `MP3_DOWNLOAD_DIR` and `COVER_DOWNLOAD_DIR` do not exist. You **must** create them manually before running the application.
 
 ## 🚀 Usage
 
@@ -79,8 +95,8 @@ Download the media, convert it to MP3, apply metadata, and download the cover ar
   ```json
   {
     "success": true,
-    "mp3Path": "downloads/filename.mp3",
-    "coverPath": "downloads/filename.jpg"
+    "mp3Path": "mp3/filename.mp3",
+    "coverPath": "cover/filename.jpg"
   }
   ```
 

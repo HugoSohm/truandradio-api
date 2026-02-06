@@ -1,7 +1,8 @@
 node_modules
 dist
-downloads
 .env
 server.log
 yt-dlp
 yt-dlp.exe
+mp3
+cover
