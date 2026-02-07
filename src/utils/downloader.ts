@@ -117,6 +117,33 @@ const getDeezerTrackInfo = async (trackId: string): Promise<TrackMetadata> => {
     };
 };
 
+const searchSpotifyTrack = async (artist: string, title: string): Promise<TrackMetadata | null> => {
+    try {
+        const token = await getSpotifyAccessToken();
+        const query = encodeURIComponent(`artist:${artist} track:${title}`);
+        const response = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) return null;
+
+        const data: any = await response.json();
+        const track = data.tracks?.items?.[0];
+
+        if (!track) return null;
+
+        return {
+            title: track.name,
+            artists: track.artists.map((a: any) => a.name),
+            coverUrl: track.album.images[0]?.url || '',
+            source: SourceType.SPOTIFY
+        };
+    } catch (error) {
+        console.error(`[Spotify Search] Failed: ${error}`);
+        return null;
+    }
+};
+
 const executeYtDlp = async (url: string, cookies?: any[], extraArgs: string[] = []): Promise<any> => {
     const args = ['--dump-json', '--no-playlist', '--js-runtimes', 'node', ...extraArgs];
 
@@ -203,10 +230,17 @@ export const getTrackInfo = async (url: string, cookies?: any[]): Promise<TrackM
 
             console.log(`[YouTube] Fetching info: ${url}`);
             const info = await executeYtDlp(url, cookies);
-            const { title, artists } = parseArtistsTitle(info.title || 'Unknown Title', info.uploader || 'Unknown Artist');
-            const coverUrl = info.thumbnail || info.thumbnails?.[info.thumbnails.length - 1]?.url || '';
+            const { title: parsedTitle, artists: parsedArtists } = parseArtistsTitle(info.title || 'Unknown Title', info.uploader || 'Unknown Artist');
 
-            return { title, artists, coverUrl, source: SourceType.YOUTUBE };
+            // Try Spotify lookup for cleaner metadata
+            const spotifyInfo = await searchSpotifyTrack(parsedArtists[0], parsedTitle);
+            if (spotifyInfo) {
+                console.log(`[Spotify] Found match for YouTube track: ${spotifyInfo.artists.join(', ')} - ${spotifyInfo.title}`);
+                return { ...spotifyInfo, source: SourceType.YOUTUBE }; // Keep source as YouTube for downstream
+            }
+
+            const coverUrl = info.thumbnail || info.thumbnails?.[info.thumbnails.length - 1]?.url || '';
+            return { title: parsedTitle, artists: parsedArtists, coverUrl, source: SourceType.YOUTUBE };
         }
 
         case SourceType.SOUNDCLOUD: {
