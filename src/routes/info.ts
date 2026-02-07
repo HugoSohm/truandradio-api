@@ -20,8 +20,8 @@ export default async function infoRoutes(app: FastifyInstance) {
                     cookies = cookiesRaw;
                 }
             }
-            const { title, artists, coverUrl } = await getTrackInfo(url, cookies);
-            return reply.send({ title, artists, coverUrl });
+            const info = await getTrackInfo(url, cookies);
+            return reply.send(info);
         } catch (error: any) {
             request.log.error(error);
             return reply.status(500).send({ error: "Failed to get info", details: error.message });

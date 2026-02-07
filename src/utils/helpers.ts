@@ -26,7 +26,6 @@ export const parseArtistsTitle = (fullTitle: string, uploaderName: string): { ti
     let title = fullTitle;
     let artists: string[] = [uploaderName];
 
-    // Attempt to parse "Artist - Title" format
     const separatorRegex = / - /;
     if (separatorRegex.test(title)) {
         const parts = title.split(separatorRegex);
@@ -37,7 +36,6 @@ export const parseArtistsTitle = (fullTitle: string, uploaderName: string): { ti
         }
     }
 
-    // Clean up title (remove (Official Video), empty brackets, etc.)
     title = title.replace(/\([^)]*Official[^)]*\)/gi, '')
         .replace(/\([^)]*Video[^)]*\)/gi, '')
         .replace(/\(^\)/g, '').trim();
@@ -55,7 +53,6 @@ export const validateCookies = (cookies: any[]): boolean => {
     );
 };
 
-// Helper to write cookies to Netscape format for yt-dlp
 export const writeCookiesFile = (cookies: any[]): string => {
     const tempPath = path.join(process.cwd(), `cookies-${Date.now()}.txt`);
     const netscapeCookies = cookies.map(cookie => {
@@ -73,7 +70,6 @@ export const writeCookiesFile = (cookies: any[]): string => {
     return tempPath;
 };
 
-// Helper to get value from potential multipart field or raw body
 export const getBodyFieldValue = (field: any): any => {
     if (field && typeof field === 'object' && 'value' in field) {
         return field.value;

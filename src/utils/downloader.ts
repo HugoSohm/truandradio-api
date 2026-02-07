@@ -5,33 +5,35 @@ import { execFile } from 'child_process';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import scdl from 'soundcloud-downloader';
+import pRetry from 'p-retry';
 import { sanitizeFilename, parseArtistsTitle, validateCookies, writeCookiesFile, SourceType, getSourceFromUrl } from './helpers';
 
 const execFileAsync = promisify(execFile);
 
-if (ffmpegStatic) {
-    ffmpeg.setFfmpegPath(ffmpegStatic);
+const FFMPEG_STATIC_PATH = (ffmpegStatic && fs.existsSync(ffmpegStatic)) ? ffmpegStatic : null;
+
+if (FFMPEG_STATIC_PATH) {
+    ffmpeg.setFfmpegPath(FFMPEG_STATIC_PATH);
 }
 
 const YTDLP_FILENAME = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
 const YTDLP_PATH = path.join(process.cwd(), YTDLP_FILENAME);
-const MP3_DIR = path.resolve(process.env.MP3_DOWNLOAD_DIR ?? '')
-const COVER_DIR = path.resolve(process.env.COVER_DOWNLOAD_DIR ?? '')
+const MP3_DIR = path.resolve(process.env.MP3_DOWNLOAD_DIR ?? 'mp3');
+const COVER_DIR = path.resolve(process.env.COVER_DOWNLOAD_DIR ?? 'cover');
 
 if (!fs.existsSync(MP3_DIR)) {
-    throw new Error(`MP3 download directory not found: ${MP3_DIR}. Please create it manually.`);
+    fs.mkdirSync(MP3_DIR, { recursive: true });
 }
-
 if (!fs.existsSync(COVER_DIR)) {
-    throw new Error(`Cover download directory not found: ${COVER_DIR}. Please create it manually.`);
+    fs.mkdirSync(COVER_DIR, { recursive: true });
 }
-
 
 export interface TrackMetadata {
     title: string;
     artists: string[];
     coverUrl: string;
     source: SourceType;
+    url?: string;
 }
 
 export interface DownloadResult {
@@ -118,8 +120,8 @@ const getDeezerTrackInfo = async (trackId: string): Promise<TrackMetadata> => {
 const executeYtDlp = async (url: string, cookies?: any[], extraArgs: string[] = []): Promise<any> => {
     const args = ['--dump-json', '--no-playlist', '--js-runtimes', 'node', ...extraArgs];
 
-    if (ffmpegStatic) {
-        args.push('--ffmpeg-location', ffmpegStatic);
+    if (FFMPEG_STATIC_PATH) {
+        args.push('--ffmpeg-location', FFMPEG_STATIC_PATH);
     }
 
     let cookiesFile: string | null = null;
@@ -128,12 +130,64 @@ const executeYtDlp = async (url: string, cookies?: any[], extraArgs: string[] = 
         args.push('--cookies', cookiesFile);
     }
 
+    return await pRetry(async () => {
+        try {
+            const { stdout } = await execFileAsync(YTDLP_PATH, [...args, url], { timeout: 60000 });
+            return JSON.parse(stdout);
+        } catch (error: any) {
+            throw error;
+        } finally {
+            if (cookiesFile && fs.existsSync(cookiesFile)) {
+                try { fs.unlinkSync(cookiesFile); } catch (e) { }
+            }
+        }
+    }, {
+        retries: 3,
+        onFailedAttempt: error => {
+            console.log(`Attempt ${error.attemptNumber} failed. There are ${error.retriesLeft} retries left.`);
+        }
+    });
+};
+
+export const searchTracks = async (artist?: string, title?: string, limit: number = 5, cookies?: any[]): Promise<TrackMetadata[]> => {
+    const query = [artist, title].filter(Boolean).join(' ');
+    const searchUrl = `ytsearch${limit}:${query}`;
+    console.log(`[Search] Searching for: ${query}`);
+    const args = ['--flat-playlist', '--dump-json'];
+
+    let cookieFile: string | null = null;
+    if (cookies && cookies.length > 0 && validateCookies(cookies)) {
+        cookieFile = writeCookiesFile(cookies);
+        args.push('--cookies', cookieFile);
+    }
+
     try {
-        const { stdout } = await execFileAsync(YTDLP_PATH, [...args, url]);
-        return JSON.parse(stdout);
+        const { stdout } = await execFileAsync(YTDLP_PATH, [...args, searchUrl], { timeout: 30000 });
+        const results = stdout.trim() === '' ? [] : stdout.trim().split('\n').map(line => JSON.parse(line));
+
+        return results.map(res => {
+            const { title, artists } = parseArtistsTitle(res.title || 'Unknown Title', res.uploader || 'Unknown Artist');
+
+            let coverUrl = res.thumbnail || '';
+            if (!coverUrl && Array.isArray(res.thumbnails) && res.thumbnails.length > 0) {
+                coverUrl = res.thumbnails[res.thumbnails.length - 1].url || '';
+            }
+
+            if (!coverUrl && res.id) {
+                coverUrl = `https://i.ytimg.com/vi/${res.id}/mqdefault.jpg`;
+            }
+
+            return {
+                title,
+                artists,
+                coverUrl,
+                url: `https://www.youtube.com/watch?v=${res.id}`,
+                source: SourceType.YOUTUBE
+            };
+        });
     } finally {
-        if (cookiesFile && fs.existsSync(cookiesFile)) {
-            fs.unlinkSync(cookiesFile);
+        if (cookieFile && fs.existsSync(cookieFile)) {
+            fs.unlinkSync(cookieFile);
         }
     }
 };
@@ -144,65 +198,46 @@ export const getTrackInfo = async (url: string, cookies?: any[]): Promise<TrackM
     switch (source) {
         case SourceType.YOUTUBE: {
             if (cookies && cookies.length > 0 && !validateCookies(cookies)) {
-                throw new Error('Invalid cookie format. Each cookie must have at least "name" and "value" properties.');
+                throw new Error('Invalid cookie format.');
             }
 
-            console.log(`[YouTube] Fetching info with yt-dlp${cookies ? ` (${cookies.length} cookies)` : ''}`);
+            console.log(`[YouTube] Fetching info: ${url}`);
             const info = await executeYtDlp(url, cookies);
-
             const { title, artists } = parseArtistsTitle(info.title || 'Unknown Title', info.uploader || 'Unknown Artist');
-
             const coverUrl = info.thumbnail || info.thumbnails?.[info.thumbnails.length - 1]?.url || '';
 
-            return {
-                title,
-                artists,
-                coverUrl,
-                source: SourceType.YOUTUBE
-            };
+            return { title, artists, coverUrl, source: SourceType.YOUTUBE };
         }
 
         case SourceType.SOUNDCLOUD: {
-            const info = await scdl.getInfo(url);
-            const { title, artists } = parseArtistsTitle(info.title || "Unknown Title", info.user?.username || "Unknown Artist");
-
-            let coverUrl = info.artwork_url || info.user?.avatar_url || "";
-            if (coverUrl) {
-                coverUrl = coverUrl.replace('-large', '-t500x500');
-            }
-
-            return {
-                title,
-                artists,
-                coverUrl,
-                source: SourceType.SOUNDCLOUD
-            };
+            return await pRetry(async () => {
+                const info = await scdl.getInfo(url);
+                const { title, artists } = parseArtistsTitle(info.title || "Unknown Title", info.user?.username || "Unknown Artist");
+                let coverUrl = info.artwork_url || info.user?.avatar_url || "";
+                if (coverUrl) coverUrl = coverUrl.replace('-large', '-t500x500');
+                return { title, artists, coverUrl, source: SourceType.SOUNDCLOUD };
+            }, { retries: 2 });
         }
 
         case SourceType.SPOTIFY: {
             const trackIdMatch = url.match(/track\/([a-zA-Z0-9]+)/);
             if (!trackIdMatch) throw new Error("Invalid Spotify track URL");
-            const trackId = trackIdMatch[1];
-            console.log(`[Spotify] Fetching metadata for track ID: ${trackId}`);
-            return await getSpotifyTrackInfo(trackId);
+            return await getSpotifyTrackInfo(trackIdMatch[1]);
         }
 
         case SourceType.DEEZER: {
             let targetUrl = url;
             if (url.includes('deezer.page.link') || url.includes('link.deezer.com') || !url.includes('/track/')) {
-                console.log(`[Deezer] Following redirect for: ${url}`);
                 try {
                     const response = await fetch(url, { redirect: 'follow' });
                     targetUrl = response.url;
-                    console.log(`[Deezer] Redirected to: ${targetUrl}`);
                 } catch (e) {
-                    console.warn(`[Deezer] Redirect failed: ${e}. Proceeding with original URL.`);
+                    console.warn(`[Deezer] Redirect failed: ${e}`);
                 }
             }
 
             const trackIdMatch = targetUrl.match(/track\/([0-9]+)/);
             if (!trackIdMatch) {
-                console.log(`[Deezer] No track ID found in URL (${targetUrl}), falling back to yt-dlp`);
                 const info = await executeYtDlp(targetUrl);
                 return {
                     title: info.track || info.title,
@@ -211,13 +246,10 @@ export const getTrackInfo = async (url: string, cookies?: any[]): Promise<TrackM
                     source: SourceType.DEEZER
                 };
             }
-            const trackId = trackIdMatch[1];
-            console.log(`[Deezer] Fetching metadata for track ID: ${trackId}`);
-            return await getDeezerTrackInfo(trackId);
+            return await getDeezerTrackInfo(trackIdMatch[1]);
         }
 
         case SourceType.APPLE_MUSIC: {
-            console.log(`[Apple Music] Fetching metadata with yt-dlp`);
             const info = await executeYtDlp(url);
             return {
                 title: info.track || info.title,
@@ -228,7 +260,7 @@ export const getTrackInfo = async (url: string, cookies?: any[]): Promise<TrackM
         }
 
         default:
-            throw new Error("Unsupported URL. YouTube, SoundCloud, Spotify, Deezer and Apple Music are supported.");
+            throw new Error("Unsupported URL.");
     }
 };
 
@@ -236,13 +268,8 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
     const targetMp3Dir = mp3SubPath ? path.join(MP3_DIR, mp3SubPath) : MP3_DIR;
     const targetCoverDir = coverSubPath ? path.join(COVER_DIR, coverSubPath) : COVER_DIR;
 
-    if (!fs.existsSync(targetMp3Dir)) {
-        throw new Error(`MP3 download directory not found: ${targetMp3Dir}. Please create it manually.`);
-    }
-
-    if (!fs.existsSync(targetCoverDir)) {
-        throw new Error(`Cover download directory not found: ${targetCoverDir}. Please create it manually.`);
-    }
+    if (!fs.existsSync(targetMp3Dir)) fs.mkdirSync(targetMp3Dir, { recursive: true });
+    if (!fs.existsSync(targetCoverDir)) fs.mkdirSync(targetCoverDir, { recursive: true });
 
     const metadata = await getTrackInfo(url, cookies);
 
@@ -256,62 +283,16 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
     const mp3Path = path.join(targetMp3Dir, `${filenameBase}.mp3`);
     const coverPath = path.join(targetCoverDir, `${filenameBase}.jpg`);
 
+    const tempBasePath = path.join(targetMp3Dir, `temp-${Date.now()}`);
+    let downloadUrl = url;
 
-    if (metadata.source === SourceType.YOUTUBE) {
-        const tempBasePath = path.join(targetMp3Dir, `temp-${Date.now()}`);
-        const ytdlpArgs = [
-            '-f', 'bestaudio',
-            '--output', `${tempBasePath}.%(ext)s`,
-            '--no-playlist',
-            '--js-runtimes', 'node'
-        ];
-
-        if (ffmpegStatic) {
-            ytdlpArgs.push('--ffmpeg-location', ffmpegStatic);
-        }
-
-        let cookiesFile: string | null = null;
-        if (cookies && cookies.length > 0) {
-            if (!validateCookies(cookies)) {
-                throw new Error('Invalid cookie format. Each cookie must have at least "name" and "value" properties.');
-            }
-            cookiesFile = writeCookiesFile(cookies);
-            ytdlpArgs.push('--cookies', cookiesFile);
-        }
-
-        try {
-            await execFileAsync(YTDLP_PATH, [...ytdlpArgs, url]);
-
-            const files = fs.readdirSync(targetMp3Dir).filter(f => f.startsWith(`temp-`) && f.includes(tempBasePath.split(path.sep).pop()!));
-            if (files.length === 0) {
-                throw new Error('Downloaded audio file not found');
-            }
-            const tempAudioPath = path.join(targetMp3Dir, files[0]);
-
-            await new Promise<void>((resolve, reject) => {
-                ffmpeg(tempAudioPath)
-                    .audioBitrate(320)
-                    .save(mp3Path)
-                    .outputOptions('-metadata', `title=${metadata.title}`)
-                    .outputOptions('-metadata', `artist=${artistString}`)
-                    .on('end', () => resolve())
-                    .on('error', (err) => reject(err));
-            });
-
-            if (fs.existsSync(tempAudioPath)) {
-                fs.unlinkSync(tempAudioPath);
-            }
-        } finally {
-            if (cookiesFile && fs.existsSync(cookiesFile)) {
-                fs.unlinkSync(cookiesFile);
-            }
-        }
-    } else if (metadata.source === SourceType.SPOTIFY || metadata.source === SourceType.DEEZER || metadata.source === SourceType.APPLE_MUSIC) {
+    if ([SourceType.SPOTIFY, SourceType.DEEZER, SourceType.APPLE_MUSIC].includes(metadata.source)) {
         const query = `${metadata.artists.join(' ')} - ${metadata.title}`;
-        console.log(`[Search] Searching YouTube for: ${query} (${metadata.source})`);
-        const searchUrl = `ytsearch1:${query}`;
+        console.log(`[Search] YouTube search for: ${query}`);
+        downloadUrl = `ytsearch1:${query}`;
+    }
 
-        const tempBasePath = path.join(targetMp3Dir, `temp-${Date.now()}`);
+    if (metadata.source !== SourceType.SOUNDCLOUD) {
         const ytdlpArgs = [
             '-f', 'bestaudio',
             '--output', `${tempBasePath}.%(ext)s`,
@@ -319,48 +300,35 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
             '--js-runtimes', 'node'
         ];
 
-        if (ffmpegStatic) {
-            ytdlpArgs.push('--ffmpeg-location', ffmpegStatic);
-        }
+        if (FFMPEG_STATIC_PATH) ytdlpArgs.push('--ffmpeg-location', FFMPEG_STATIC_PATH);
 
         let cookiesFile: string | null = null;
         if (cookies && cookies.length > 0) {
-            if (!validateCookies(cookies)) {
-                throw new Error('Invalid cookie format. Each cookie must have at least "name" and "value" properties.');
-            }
             cookiesFile = writeCookiesFile(cookies);
             ytdlpArgs.push('--cookies', cookiesFile);
         }
 
         try {
-            await execFileAsync(YTDLP_PATH, [...ytdlpArgs, searchUrl]);
+            await pRetry(async () => {
+                await execFileAsync(YTDLP_PATH, [...ytdlpArgs, downloadUrl], { timeout: 300000 });
+            }, { retries: 2 });
 
             const files = fs.readdirSync(targetMp3Dir).filter(f => f.startsWith(`temp-`) && f.includes(tempBasePath.split(path.sep).pop()!));
-            if (files.length === 0) {
-                throw new Error('Search result download failed');
-            }
+            if (files.length === 0) throw new Error('Downloaded audio file not found');
             const tempAudioPath = path.join(targetMp3Dir, files[0]);
 
             await new Promise<void>((resolve, reject) => {
                 ffmpeg(tempAudioPath)
                     .audioBitrate(320)
                     .save(mp3Path)
-                    .outputOptions('-metadata', `title=${metadata.title}`)
-                    .outputOptions('-metadata', `artist=${artistString}`)
+                    .outputOptions('-metadata', `title=${metadata.title}`, '-metadata', `artist=${artistString}`)
                     .on('end', () => resolve())
                     .on('error', (err) => reject(err));
             });
 
-            if (fs.existsSync(tempAudioPath)) {
-                fs.unlinkSync(tempAudioPath);
-            }
-        } catch (e) {
-            console.error(`${metadata.source} search/download failed:`, e);
-            throw e;
+            if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
         } finally {
-            if (cookiesFile && fs.existsSync(cookiesFile)) {
-                fs.unlinkSync(cookiesFile);
-            }
+            if (cookiesFile && fs.existsSync(cookiesFile)) try { fs.unlinkSync(cookiesFile); } catch (e) { }
         }
     } else {
         const audioStream = await scdl.download(url);
@@ -368,8 +336,7 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
             ffmpeg(audioStream)
                 .audioBitrate(320)
                 .save(mp3Path)
-                .outputOptions('-metadata', `title=${metadata.title}`)
-                .outputOptions('-metadata', `artist=${artistString}`)
+                .outputOptions('-metadata', `title=${metadata.title}`, '-metadata', `artist=${artistString}`)
                 .on('end', () => resolve())
                 .on('error', (err) => reject(err));
         });
@@ -377,15 +344,11 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
 
     if (metadata.coverUrl) {
         try {
-            await downloadImage(metadata.coverUrl, coverPath);
+            await pRetry(() => downloadImage(metadata.coverUrl, coverPath), { retries: 2 });
         } catch (e) {
             console.error("Failed to download cover:", e);
         }
     }
 
-    return {
-        mp3Path,
-        coverPath,
-        metadata
-    };
+    return { mp3Path, coverPath, metadata };
 };

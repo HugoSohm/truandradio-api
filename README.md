@@ -1,152 +1,153 @@
 # <img src="https://www.truand2lagalere.fr/images/apple-touch-icon.png" width="40" height="40" style="vertical-align: middle;"> Galere Radio API
 
-API for retrieving information, downloading media, and grabbing cover art from various platforms with metadata support.
+API for retrieving information, downloading media (queued), and grabbing cover art from various platforms with metadata support.
 
-## 🌐 Supported Platforms
+## ✨ Features
+
+- 🔍 **Integrated Search**: Search for tracks directly on YouTube via the `/search` endpoint.
+- 🕒 **Async Downloads**: Background processing via BullMQ with status tracking.
+- 🖼️ **Metadata & Covers**: Automatic extraction of high-res cover art and tags.
+- 🛡️ **Security**: Protected endpoints with API Key authentication.
+- 🐋 **Docker Ready**: Pre-configured setup with Docker Compose.
+- 📖 **API Docs**: Interactive documentation via Swagger UI.
+
+## 🌟 Supported Platforms
 
 - 🎥 **YouTube** (via yt-dlp)
 - ☁️ **SoundCloud** (via scdl)
-- 🎧 **Spotify** (Metadata)
-- 🎶 **Deezer** (Metadata)
-- 🍎 **Apple Music** (Metadata)
+- 🎧 **Spotify** (Metadata & Search)
+- 🎶 **Deezer** (Metadata & Search)
+- 🍎 **Apple Music** (Metadata & Search)
 
-## 📋 Prerequisites
+## 🚀 Getting Started
 
-- Node.js (v18+)
+### 🐋 Option 1: Docker (Recommended)
 
-## ⚙️ Installation
+The easiest way to run the API with all its dependencies (including Redis):
 
-1. Clone the repository
-2. Install dependencies:
+1. **Prerequisites**: [Docker & Docker Compose](https://www.docker.com/products/docker-desktop/)
+2. **Setup**: Create a `.env` file from `.env.sample`.
+3. **Run**: 
+   ```bash
+   npm run deploy
+   ```
+4. **Access**: API at `http://localhost:3000` and Docs at `http://localhost:3000/docs`.
+
+---
+
+### 💻 Option 2: Local Development
+
+If you prefer to run the project directly on your machine:
+
+1. **Prerequisites**:
+   - Node.js (v20+)
+   - Redis (Running on `localhost:6379`)
+2. **Setup**:
    ```bash
    npm install
+   cp .env.sample .env
    ```
-3. Configure environment variables in a `.env` file (see `.env.sample`)
-4. **Create the download directories manually** (see [Configuration](#-configuration))
+3. **Run**:
+   ```bash
+   npm run dev
+   ```
+4. **Access**: API at `http://localhost:3000`.
 
 ## ⚙️ Configuration
-
-The following environment variables are available:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | The port the server will listen on | `3000` |
+| `API_KEY` | Secret key required in `X-API-Key` header | - |
+| `REDIS_URL` | URL for the Redis instance | `redis://localhost:6379` |
 | `MP3_DOWNLOAD_DIR` | Directory where MP3 files will be stored | `mp3` |
 | `COVER_DOWNLOAD_DIR` | Directory where cover images will be stored | `covers` |
 | `SPOTIFY_CLIENT_ID` | Your Spotify Application Client ID | - |
 | `SPOTIFY_CLIENT_SECRET` | Your Spotify Application Client Secret | - |
 
-> [!IMPORTANT]
-> **Strict Directory Validation**: The server will fail to start if the directories specified in `MP3_DOWNLOAD_DIR` and `COVER_DOWNLOAD_DIR` do not exist. You **must** create them manually before running the application.
+## 🛡️ Authentication
 
-## 🚀 Usage
-
-### Development
-```bash
-npm run dev
-```
-
-### Production
-```bash
-npm run build
-npm start
-```
-
-## 🚀 Deployment
-
-A `deploy.sh` script is available in the root directory to automate deployment on the VPS server.
-
-### Using the Deployment Script
-
-1. Make the script executable (only needed once):
-   ```bash
-   chmod +x deploy.sh
-   ```
-2. Run the deployment:
-   ```bash
-   ./deploy.sh
-   # OR
-   npm run deploy
-   ```
-
-> [!IMPORTANT]
-> **VPS Configuration**: The `pm2 restart 11` command inside the script is specific to the process ID on the current VPS server. If you install this project on another server, you will likely need to update this ID in `deploy.sh`.
+All routes (except `/health` and `/docs`) require an API Key if `API_KEY` is set in the environment.
+Add the following header to your requests:
+`X-API-Key: YOUR_API_KEY`
 
 ## 🛣️ API Routes
 
+### Interactive Documentation
+Static documentation is served at `/docs` (Swagger UI).
+
 ### Health Check
-Check if the API is functional.
-
 - **URL**: `/health`
-- **Method**: `GET`
-- **Response**:
-  ```json
-  { "status": "ok" }
-  ```
+- **Method**: `GET` (No Auth)
 
-### Track Information
-Retrieve metadata from a URL without downloading the file.
+### Search
+Search for tracks on YouTube.
+- **URL**: `/search`
+- **Method**: `POST`
+- **Body**: `{ "artist": "Daft Punk", "title": "Get Lucky", "cookies": [...], "limit": 5 }` (artist, title, and cookies are optional, but at least artist or title is required)
 
+### Get Info
+Retrieve metadata for a given URL.
 - **URL**: `/info`
 - **Method**: `POST`
-- **Body**: Supports `application/json`, `multipart/form-data`, and `application/x-www-form-urlencoded`.
-  - `url` (**Required**): The media URL (YouTube, SoundCloud, etc.).
-  - `cookies` (Optional): A JSON array of cookies.
-- **Response**:
-  ```json
-  {
-    "title": "Track Title",
-    "artists": ["Artist 1"],
-    "coverUrl": "https://..."
-  }
-  ```
+- **Body**: `{ "url": "..." }`
 
-### Download
-Download the media, convert it to MP3, apply metadata, and download the cover art.
-
+### Download (Queued)
+Starts a background download job.
 - **URL**: `/download`
 - **Method**: `POST`
-- **Body**: Supports `application/json`, `multipart/form-data`, and `application/x-www-form-urlencoded`.
-  - `url` (**Required**): The media URL.
-  - `title` (Optional): Custom title to apply to the MP3 file.
-  - `artists` (Optional): An array/list of artists (e.g., `["Artist 1", "Artist 2"]` in JSON, or comma-separated in forms).
-  - `cookies` (Optional): A JSON array of cookies.
-  - `mp3SubPath` (Optional): A relative path to a subdirectory within the MP3 download folder.
-  - `coverSubPath` (Optional): A relative path to a subdirectory within the cover download folder.
+- **Body**: 
+  ```json
+  {
+    "url": "https://www.youtube.com/watch?v=...",
+    "title": "Custom Title" (optional),
+    "artists": ["Artist 1", "Artist 2"] (optional),
+    "cookies": [...], (optional, Netscape JSON format),
+    "mp3SubPath": "subdir/...", (optional),
+    "coverSubPath": "subdir/..." (optional)
+  }
+  ```
 - **Response**:
   ```json
   {
     "success": true,
-    "mp3Path": "mp3/filename.mp3",
-    "coverPath": "cover/filename.jpg"
+    "jobId": "7",
+    "message": "Download queued successfully"
   }
   ```
 
-> [!IMPORTANT]
-> **Subdirectory Validation**: If you use `mp3SubPath` or `coverSubPath`, the corresponding subdirectories must already exist inside their respective base directories (`MP3_DOWNLOAD_DIR` or `COVER_DOWNLOAD_DIR`). The server will not create them for you.
-
-## 🔓 Bypassing YouTube Restrictions
-
-Some YouTube videos may require cookies to bypass age or region restrictions.
-
-### How to export cookies with EditThisCookie
-
-1. Install the **EditThisCookie** extension in your browser ([Chrome Web Store](https://chrome.google.com/webstore/detail/editthiscookie/fngmhnnpnoocnehlgrffbeobnadjmcij)).
-2. Log in to YouTube and go to any YouTube page.
-3. Click on the extension icon and then on the **Options** (wrench icon).
-4. In the "Choose the format for the cookies" section, select **JSON**.
-5. Go back to the extension main menu and click the **Export** button (arrow pointing out).
-6. The cookies are now in your clipboard. You can paste this JSON array directly into the `cookies` field of the request body for `/info` or `/download` routes.
-
-> ⚠️ **IMPORTANT**: The API supports JSON body, Form-data and x-www-form-urlencoded. When using tools like Postman, you can use any of these tabs.
+### Job Status
+Check the status and result of a download.
+- **URL**: `/jobs`
+- **Method**: `GET`
+- **Query Params**: `id=YOUR_JOB_ID`
+- **Response**:
+  ```json
+  {
+    "id": "7",
+    "status": "completed",
+    "progress": 100,
+    "result": {
+      "mp3Path": "/app/mp3/Song.mp3",
+      "coverPath": "/app/cover/Song.jpg",
+      "metadata": {
+        "title": "Song Title",
+        "artists": ["Artist"],
+        "coverUrl": "...",
+        "source": "youtube"
+      }
+    },
+    "error": null
+  }
+  ```
 
 ## 🛠️ Technologies Used
 
-- [Fastify](https://www.fastify.io/) - Fast and low overhead web framework
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - Media downloading (YouTube, Apple Music metadata)
-- [soundcloud-downloader](https://github.com/SalaceP/soundcloud-downloader) - Specific downloader for SoundCloud
-- [Spotify Web API](https://developer.spotify.com/documentation/web-api/) - Metadata retrieval for Spotify links
-- [Deezer API](https://developers.deezer.com/api) - Metadata retrieval for Deezer links
-- [fluent-ffmpeg](https://github.com/fluent-ffmpeg/node-fluent-ffmpeg) - Audio processing and metadata tagging
-- [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) - Bundled FFmpeg binaries
-- [TypeScript](https://www.typescriptlang.org/) - Type-safe programming language
+- [Fastify](https://www.fastify.io/) - Web framework
+- [BullMQ](https://docs.bullmq.io/) - Message queue & background jobs
+- [Redis](https://redis.io/) - Data store for BullMQ
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - Media downloading
+- [SoundCloud Downloader](https://github.com/dandv/soundcloud-downloader) - SoundCloud media fetching
+- [fluent-ffmpeg](https://github.com/fluent-ffmpeg/node-fluent-ffmpeg) - Audio processing
+- [Swagger](https://swagger.io/) - API Documentation
+- [Docker](https://www.docker.com/) - Containerization

@@ -6,7 +6,6 @@ export const errorHandler = (error: FastifyError, request: FastifyRequest, reply
             error: "Bad Request",
             message: "Validation failed",
             details: error.validation.map((err: any) => {
-                // Determine the field name
                 let field = "body";
                 if (err.instancePath) {
                     field = err.instancePath.replace(/^\//, '').replace(/\//g, '.');

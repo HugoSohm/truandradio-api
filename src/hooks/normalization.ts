@@ -11,23 +11,17 @@ export const normalizationHook = async (request: FastifyRequest) => {
     const body = request.body as Record<string, any>;
     const normalizedBody: Record<string, any> = {};
 
-    // 1. Un-wrap multipart fields and basic fields
     for (const key of Object.keys(body)) {
         normalizedBody[key] = getBodyFieldValue(body[key]);
     }
 
-    // 2. Parse complex fields if they are strings (JSON or comma separated)
-
-    // Handle Cookies
     if (typeof normalizedBody.cookies === 'string' && normalizedBody.cookies.trim() !== '') {
         try {
             normalizedBody.cookies = JSON.parse(normalizedBody.cookies);
         } catch (e) {
-            // If not valid JSON, we leave it as string and schema/handler will handle it
         }
     }
 
-    // Handle Artists
     if (typeof normalizedBody.artists === 'string' && normalizedBody.artists.trim() !== '') {
         try {
             const parsed = JSON.parse(normalizedBody.artists);
@@ -44,7 +38,6 @@ export const normalizationHook = async (request: FastifyRequest) => {
             }
         }
     } else if (Array.isArray(normalizedBody.artists)) {
-        // Un-wrap potential multipart values inside array
         normalizedBody.artists = normalizedBody.artists.map((a: any) => getBodyFieldValue(a));
     }
 

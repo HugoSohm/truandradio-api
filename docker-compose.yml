@@ -1,0 +1,30 @@
+services:
+  api:
+    build: .
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    volumes:
+      - ./mp3:/app/mp3
+      - ./cover:/app/cover
+    environment:
+      - PORT=${PORT:-3000}
+      - MP3_DOWNLOAD_DIR=/app/mp3
+      - COVER_DOWNLOAD_DIR=/app/cover
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
+      - API_KEY=${API_KEY}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    restart: always
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+
+volumes:
+  redis_data:
