@@ -13,6 +13,7 @@ services:
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
       - API_KEY=${API_KEY}
+      - BASE_URL=${BASE_URL}
       - REDIS_URL=redis://redis:6379
     depends_on:
       - redis
