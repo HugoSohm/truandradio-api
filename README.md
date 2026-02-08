@@ -208,6 +208,26 @@ Returns a grouped list of audio files and their associated covers. While the dow
   ]
   ```
 
+### Upload Cover
+Upload a cover image for an existing audio file.
+- **URL**: `/files/cover`
+- **Method**: `POST`
+- **Body**: Multipart/form-data
+    - `id`: The ID of the audio file (`Title-Artist`).
+    - `file`: The image file (JPG, PNG, WebP).
+    - `audioSubPath`: (Optional) The subdirectory for the audio file.
+    - `coverSubPath`: (Optional) The subdirectory for the cover file.
+    - `subPath`: (Optional) Fallback for both audio and cover subpaths.
+- **Response**:
+  ```json
+  {
+    "success": true,
+    "id": "Song-Artist",
+    "path": "/cover/Song-Artist.jpg",
+    "url": "http://localhost:${PORT}/cover/Song-Artist.jpg"
+  }
+  ```
+
 ### Delete Files
 Deletes files based on query parameters.
 - **URL**: `/files`
