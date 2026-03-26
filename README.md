@@ -11,15 +11,15 @@ API for retrieving information, downloading media (queued), and grabbing cover a
 - 🎵 **Playlist Support**: Automatically detect and download entire YouTube playlists.
 - 🛡️ **Security**: Protected endpoints with API Key authentication.
 - 🐋 **Docker Ready**: Pre-configured setup with Docker Compose.
-- 📖 **API Docs**: Interactive documentation via Swagger UI.
+- 📖 **API Docs**: Interactive specification documentation via Swagger UI _(OpenAPI 3.0)_.
 
 ## 🌟 Supported Platforms
 
 - 🔴 **YouTube** (via yt-dlp)
 - ☁️ **SoundCloud** (via scdl)
-- 🟢 **Spotify** (Metadata & Search)
-- 🟣 **Deezer** (Metadata & Search)
-- 🍎 **Apple Music** (Metadata & Search)
+- 🟢 **Spotify** (Metadata & search on Youtube)
+- 🟣 **Deezer** (Metadata & search on Youtube)
+- 🍎 **Apple Music** (Metadata & search on Youtube)
 
 ## 🚀 Getting Started
 
@@ -62,6 +62,7 @@ If you prefer to run the project directly on your machine:
 | `PORT` | The port the server will listen on | `3000` |
 | `API_KEY` | Secret key required in `X-API-Key` header | - |
 | `REDIS_URL` | URL for the Redis instance | `redis://localhost:6379` |
+| `REDIS_PASSWORD` | Password for the Redis instance (optional) | - |
 | `MP3_DOWNLOAD_DIR` | Directory where MP3 files will be stored | `/mp3` |
 | `COVER_DOWNLOAD_DIR` | Directory where cover images will be stored | `/cover` |
 | `SPOTIFY_CLIENT_ID` | Your Spotify Application Client ID | - |
@@ -76,172 +77,9 @@ Add the following header to your requests:
 
 ## 🛣️ API Routes
 
-### Interactive Documentation
-Static documentation is served at `/docs` (Swagger UI).
+All API routes, parameters, and example payloads are comprehensively documented via the interactive OpenAPI 3.0 interface.
 
-### Health Check
-- **URL**: `/health`
-- **Method**: `GET` (No Auth)
-
-### Search
-Search for tracks on YouTube.
-- **URL**: `/search`
-- **Method**: `POST`
-- **Body**: `{ "artist": "Daft Punk", "title": "Get Lucky", "cookies": [...], "limit": 5 }` (artist, title, and cookies are optional, but at least artist or title is required)
-
-### Get Info
-Retrieve metadata for a given URL (supports single tracks and YouTube playlists).
-- **URL**: `/info`
-- **Method**: `POST`
-- **Body**: `{ "url": "...", "cookies": [...] }`
-- **Response**: A JSON array of metadata objects.
-  ```json
-  [
-    {
-      "title": "Song Title",
-      "artists": ["Artist"],
-      "coverUrl": "...",
-      "source": "youtube",
-      "url": "..."
-    }
-  ]
-  ```
-
-### Local Queued Download
-Starts a background download job that saves the MP3 and cover art locally on the server. Supports bulk queuing.
-- **URL**: `/download`
-- **Method**: `POST`
-- **Body**: 
-  ```json
-  {
-    "tracks": [
-      {
-        "url": "https://www.youtube.com/watch?v=...",
-        "title": "Custom Title" (optional),
-        "artists": ["Artist 1"] (optional)
-      }
-    ],
-    "cookies": [...], (optional, global)
-    "audioSubPath": "subdir/...", (optional, global),
-    "coverSubPath": "subdir/..." (optional, global)
-  }
-  ```
-- **Response**:
-  ```json
-  {
-    "success": true,
-    "message": "1 download(s) queued successfully",
-    "count": 1,
-    "jobs": [
-      { "url": "...", "jobId": "7" }
-    ]
-  }
-  ```
-
-### Direct Streaming (Browser)
-Downloads the MP3 file directly to your browser as an attachment. Bypasses server storage and does not download cover art.
-- **URL**: `/download/stream`
-- **Method**: `POST`
-- **Body**: 
-  ```json
-  {
-    "url": "https://www.youtube.com/watch?v=...",
-    "title": "Custom Title" (optional),
-    "artists": ["Artist 1"] (optional),
-    "cookies": [...] (optional)
-  }
-  ```
-- **Response**: Binary stream (audio/mpeg) with `Content-Disposition: attachment`.
-
-### Job Status
-Check the status and result of a download.
-- **URL**: `/jobs`
-- **Method**: `GET`
-- **Query Params**: `id=YOUR_JOB_ID`
-- **Response**:
-  ```json
-  {
-    "id": "7",
-    "status": "completed",
-    "progress": 100,
-    "result": {
-      "audioPath": "/mp3/Song.mp3",
-      "coverPath": "/cover/Song.jpg",
-      "metadata": {
-        "title": "Song Title",
-        "artists": ["Artist"],
-        "coverUrl": "...",
-        "source": "youtube"
-      }
-    },
-    "error": null
-  }
-  ```
-
-### List Files
-Returns a grouped list of audio files and their associated covers. While the downloader saves in MP3, the API supports listing and managing multiple formats (MP3, WAV, M4A, OGG, FLAC, AAC).
-
-**Smart Pairing**: The API uses ID3 tags (Title and Artist) from the audio files to generate a unique `id` (`Title-Artist`). Covers are automatically paired if their filename matches this metadata-based `id`, regardless of the audio filename.
-- **URL**: `/files`
-- **Method**: `GET`
-- **Query Params**:
-    - `audioSubPath`: (Optional) The subdirectory for audio files.
-    - `coverSubPath`: (Optional) The subdirectory for cover files.
-    - `subPath`: (Optional) Fallback for both audio and cover subpaths if not specified.
-    - **Listing is not recursive.**
-- **Response**:
-  ```json
-  [
-    {
-      "id": "Song-Artist",
-      "audio": { 
-        "name": "Song-Artist.mp3", 
-        "path": "/mp3/Song-Artist.mp3",
-        "url": "http://localhost:${PORT}/mp3/Song-Artist.mp3"
-      },
-      "cover": { 
-        "name": "Song-Artist.jpg", 
-        "path": "/cover/Song-Artist.jpg",
-        "url": "http://localhost:${PORT}/cover/Song-Artist.jpg"
-      }
-    }
-  ]
-  ```
-
-### Upload Cover
-Upload a cover image for an existing audio file.
-- **URL**: `/files/cover`
-- **Method**: `POST`
-- **Body**: Multipart/form-data
-    - `id`: The ID of the audio file (`Title-Artist`).
-    - `file`: The image file (JPG, PNG, WebP).
-    - `audioSubPath`: (Optional) The subdirectory for the audio file.
-    - `coverSubPath`: (Optional) The subdirectory for the cover file.
-    - `subPath`: (Optional) Fallback for both audio and cover subpaths.
-- **Response**:
-  ```json
-  {
-    "success": true,
-    "id": "Song-Artist",
-    "path": "/cover/Song-Artist.jpg",
-    "url": "http://localhost:${PORT}/cover/Song-Artist.jpg"
-  }
-  ```
-
-### Delete Files
-Deletes files based on query parameters.
-- **URL**: `/files`
-- **Method**: `DELETE`
-- **Query Params**:
-    - **Paired deletion**: `?id=Title-Artist&audioSubPath=subdir&coverSubPath=subdir` (Deletes audio file matching the ID3 tags and the cover matching the filename)
-    - **Specific deletion**: `?type=audio|mp3|cover&filename=full_filename&subPath=subdir` (Deletes a single file)
-    - `audioSubPath`: (Optional) Audio subdirectory.
-    - `coverSubPath`: (Optional) Cover subdirectory.
-    - `subPath`: (Optional) Fallback subdirectory.
-- **Examples**:
-    - `DELETE /files?id=Song-Artist` (Root directory)
-    - `DELETE /files?id=Song-Artist&subPath=my-album` (Subdirectory)
-    - `DELETE /files?type=mp3&filename=Song-Artist.mp3`
+👉 **Access the Live Documentation**: [http://localhost:3000/docs](http://localhost:3000/docs)
 
 ## 🛠️ Technologies Used
 
