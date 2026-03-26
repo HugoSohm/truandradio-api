@@ -26,6 +26,13 @@ const app = Fastify({
     }
 });
 
+// Intercept all favicon requests natively (including Swagger's embedded ones)
+app.addHook('onRequest', async (request, reply) => {
+    if (request.url.includes('favicon.ico') || request.url.includes('favicon-16x16.png') || request.url.includes('favicon-32x32.png')) {
+        return reply.redirect('https://www.truand2lagalere.fr/images/favicon-16x16.png');
+    }
+});
+
 app.register(formbody);
 app.register(multipart, { attachFieldsToBody: true });
 
