@@ -30,6 +30,7 @@ RUN node scripts/setup-ytdlp.js
 # Create download directories (defaults)
 RUN mkdir -p mp3 cover
 
+ENV NODE_ENV=production
 ENV PORT=3000
 ENV MP3_DOWNLOAD_DIR=/mp3
 ENV COVER_DOWNLOAD_DIR=/cover

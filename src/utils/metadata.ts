@@ -1,3 +1,5 @@
+import { parseFile } from 'music-metadata';
+import path from 'path';
 import { SourceType } from '../types/metadata';
 
 /**
@@ -34,4 +36,28 @@ export const parseArtistsTitle = (fullTitle: string, uploaderName: string): { ti
         .replace(/\(^\)/g, '').trim();
 
     return { title, artists };
+};
+
+/**
+ * Gets the audio ID from ID3 tags (Title-Artist) or falls back to filename.
+ */
+export const getAudioId = async (filePath: string): Promise<string> => {
+    try {
+        const metadata = await parseFile(filePath);
+        const { title, artists, artist } = metadata.common;
+        
+        // If 'artists' array exists, join them for a complete artist string
+        const artistValue = (artists && artists.length > 0) ? artists.join(', ') : artist;
+
+        if (title && artistValue) {
+            return `${title}-${artistValue}`;
+        } else if (title) {
+            return title;
+        } else if (artistValue) {
+            return artistValue;
+        }
+    } catch (error) {
+        // Fallback to filename if parsing fails or tags are missing
+    }
+    return path.parse(filePath).name;
 };

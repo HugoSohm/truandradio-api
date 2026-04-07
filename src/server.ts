@@ -6,7 +6,7 @@ import downloadRoutes from "./routes/download";
 import searchRoutes from "./routes/search";
 import jobRoutes from "./routes/jobs";
 import filesRoutes from "./routes/files";
-import { setupWorker, connection } from './services/queue';
+import { setupWorker, connection, downloadQueue } from './services/queue';
 import formbody from '@fastify/formbody';
 import multipart, { ajvFilePlugin } from '@fastify/multipart';
 import { normalizationHook } from './hooks/normalization';
@@ -18,8 +18,18 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import pRetry, { AbortError } from 'p-retry';
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 const app = Fastify({
-    logger: true,
+    logger: isProduction ? true : {
+        transport: {
+            target: 'pino-pretty',
+            options: {
+                translateTime: 'HH:MM:ss',
+                ignore: 'pid,hostname',
+            },
+        },
+    },
     forceCloseConnections: true,
     ajv: {
         plugins: [ajvFilePlugin as any]
@@ -95,16 +105,23 @@ const PORT = Number(process.env.PORT) || 3000;
 const start = async () => {
     let worker: any;
 
+    app.addHook('onClose', async () => {
+        app.log.info('Executing Gracful Shutdown: Closing Redis connections and workers...');
+        if (worker) await worker.close();
+        await downloadQueue.close();
+        await connection.quit();
+    });
+
     const shutdown = async (signal: string) => {
+        app.log.info(`Handling ${signal} signal. Shutting down...`);
         // Force exit after 2 seconds in dev to be snappy
         const forceExit = setTimeout(() => {
             process.exit(1);
         }, 2000);
 
         try {
+            // this single call triggers the 'onClose' hook above automatically!
             await app.close();
-            if (worker) await worker.close();
-            connection.disconnect();
             clearTimeout(forceExit);
             process.exit(0);
         } catch (err) {
@@ -123,10 +140,10 @@ const start = async () => {
             try {
                 await app.listen({ port: PORT, host: "0.0.0.0" });
                 const displayUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-                console.log(`🚀 Server running on ${displayUrl}`);
+                app.log.info(`Server running on ${displayUrl}`);
             } catch (err: any) {
                 if (err.code === 'EADDRINUSE') {
-                    console.warn(`[Server] Port ${PORT} busy, retrying...`);
+                    app.log.warn(`Port ${PORT} busy, retrying...`);
                     throw err;
                 }
                 throw new AbortError(err);
@@ -136,7 +153,7 @@ const start = async () => {
             minTimeout: 500,
             maxTimeout: 2000,
             onFailedAttempt: error => {
-                console.warn(`[Server] Attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`);
+                app.log.warn(`Server attempt ${error.attemptNumber} failed. ${error.retriesLeft} retries left.`);
             }
         });
 

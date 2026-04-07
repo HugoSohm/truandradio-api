@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyPluginOptions } from "fastify";
 import fs from "fs";
 import path from "path";
 import { getFilesRecursive } from "../utils/files";
-import { parseFile } from "music-metadata";
+import { getAudioId } from "../utils/metadata";
 import { sanitizeFilename, normalizeForPairing } from "../utils/string";
 import { coverUploadSchema, playlistSyncSchema, getFilesSchema, deleteFileSchema } from "../schemas/files";
 
@@ -28,20 +28,21 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
         const audioFiles = getFilesRecursive(MP3_DIR);
 
         // Find all playlists where this audio exists
-        for (const fileObj of audioFiles) {
+        const audioResults = await Promise.all(audioFiles.map(async (fileObj) => {
             const fullPath = path.join(MP3_DIR, fileObj.relativePath);
-            const parsed = path.parse(fileObj.relativePath);
-            const ext = parsed.ext.toLowerCase();
-
+            const ext = path.extname(fileObj.relativePath).toLowerCase();
             if (audioExtensions.includes(ext)) {
-                let audioMatch = false;
-                if (parsed.name === rawId || normalizeForPairing(parsed.name) === normalizeForPairing(rawId)) {
-                    audioMatch = true;
+                const idFromTags = await getAudioId(fullPath);
+                if (idFromTags === rawId || normalizeForPairing(idFromTags) === normalizeForPairing(rawId)) {
+                    return fileObj.playlist === 'root' ? '' : fileObj.playlist;
                 }
+            }
+            return null;
+        }));
 
-                if (audioMatch) {
-                    targetPlaylists.add(fileObj.playlist === 'root' ? '' : fileObj.playlist);
-                }
+        for (const playlist of audioResults) {
+            if (playlist !== null) {
+                targetPlaylists.add(playlist);
             }
         }
 
@@ -103,21 +104,22 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
         const currentPlaylists = new Set<string>();
 
         // 1. Locate the audio source globally
-        for (const fileObj of audioFiles) {
+        const audioResults = await Promise.all(audioFiles.map(async (fileObj) => {
             const fullPath = path.join(MP3_DIR, fileObj.relativePath);
-            const parsed = path.parse(fileObj.relativePath);
-            const ext = parsed.ext.toLowerCase();
-
+            const ext = path.extname(fileObj.relativePath).toLowerCase();
             if ([".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"].includes(ext)) {
-                let match = false;
-                if (parsed.name === id || normalizeForPairing(parsed.name) === normalizeForPairing(id)) {
-                    match = true;
+                const idFromTags = await getAudioId(fullPath);
+                if (idFromTags === id || normalizeForPairing(idFromTags) === normalizeForPairing(id)) {
+                    return { fullPath, playlist: fileObj.playlist === 'root' ? '' : fileObj.playlist };
                 }
+            }
+            return null;
+        }));
 
-                if (match) {
-                    if (!audioSource) audioSource = fullPath;
-                    currentPlaylists.add(fileObj.playlist === 'root' ? '' : fileObj.playlist);
-                }
+        for (const res of audioResults) {
+            if (res) {
+                if (!audioSource) audioSource = res.fullPath;
+                currentPlaylists.add(res.playlist);
             }
         }
 
@@ -198,18 +200,24 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
         if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
 
         // 1. Process Audios
-        for (const fileObj of audioFiles) {
-            const { name: file, relativePath, playlist: playlistFolder } = fileObj;
+        const audioResults = await Promise.all(audioFiles.map(async (fileObj) => {
+            const { relativePath, playlist: playlistFolder } = fileObj;
             const fullPath = path.join(MP3_DIR, relativePath);
             const parsed = path.parse(relativePath);
             const ext = parsed.ext.toLowerCase();
             const playlistName = playlistFolder === 'root' ? '' : playlistFolder;
 
             if (audioExtensions.includes(ext)) {
-                let id = parsed.name; // Use filename directly
-
+                const audioId = await getAudioId(fullPath);
                 const webPath = `/mp3/${relativePath.replace(/\\/g, '/')}`;
+                return { id: audioId, playlistName, webPath, originalName: parsed.name };
+            }
+            return null;
+        }));
 
+        for (const res of audioResults) {
+            if (res) {
+                const { id, playlistName, webPath, originalName } = res;
                 if (!fileMap.has(id)) {
                     fileMap.set(id, {
                         id,
@@ -217,8 +225,11 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
                         audioUrl: `${baseUrl}${webPath}`
                     });
                     normalizedIndex.set(normalizeForPairing(id), id);
-                    normalizedIndex.set(normalizeForPairing(parsed.name), id);
                 }
+                
+                // Still index the original filename to the tag-based ID so covers can match if they use the filename
+                // BUT the goal is that covers SHOULD use the tag-based ID too
+                normalizedIndex.set(normalizeForPairing(originalName), id);
 
                 if (playlistName) {
                     fileMap.get(id)!.playlists.add(playlistName);
@@ -294,26 +305,28 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
 
             // Delete Audios
             const audioFiles = getFilesRecursive(MP3_DIR);
-            for (const fileObj of audioFiles) {
-                if (queryPlaylist && queryPlaylist !== 'root' && fileObj.playlist !== queryPlaylist) continue;
+            const audioResults = await Promise.all(audioFiles.map(async (fileObj) => {
+                if (queryPlaylist && queryPlaylist !== 'root' && fileObj.playlist !== queryPlaylist) return null;
 
                 const fullPath = path.join(MP3_DIR, fileObj.relativePath);
-                const parsed = path.parse(fileObj.relativePath);
-                const ext = parsed.ext.toLowerCase();
+                const ext = path.extname(fileObj.relativePath).toLowerCase();
 
                 if (audioExtensions.includes(ext)) {
-                    let match = false;
-                    if (parsed.name === id || normalizeForPairing(parsed.name) === normalizeForPairing(id)) {
-                        match = true;
+                    const idFromTags = await getAudioId(fullPath);
+                    if (idFromTags === id || normalizeForPairing(idFromTags) === normalizeForPairing(id)) {
+                        return { fullPath, relativePath: fileObj.relativePath };
                     }
+                }
+                return null;
+            }));
 
-                    if (match) {
-                        try {
-                            fs.unlinkSync(fullPath);
-                            deleted.push(`/mp3/${fileObj.relativePath.replace(/\\/g, '/')}`);
-                        } catch (err) {
-                            errors.push(`Failed to delete audio: ${fileObj.relativePath}`);
-                        }
+            for (const res of audioResults) {
+                if (res) {
+                    try {
+                        fs.unlinkSync(res.fullPath);
+                        deleted.push(`/mp3/${res.relativePath.replace(/\\/g, '/')}`);
+                    } catch (err) {
+                        errors.push(`Failed to delete audio: ${res.relativePath}`);
                     }
                 }
             }
