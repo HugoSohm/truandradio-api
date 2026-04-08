@@ -4,20 +4,22 @@ import path from "path";
 import { getFilesRecursive } from "../utils/files";
 import { getAudioInfo } from "../utils/metadata";
 import { sanitizeFilename, normalizeForPairing } from "../utils/string";
+import { downloadImage } from "../services/image";
 import { coverUploadSchema, playlistSyncSchema, getFilesSchema, deleteFileSchema } from "../schemas/files";
 
 const MP3_DIR = path.resolve(process.env.MP3_DOWNLOAD_DIR ?? 'mp3');
 const COVER_DIR = path.resolve(process.env.COVER_DOWNLOAD_DIR ?? 'cover');
 
 export default async function filesRoutes(fastify: FastifyInstance, options: FastifyPluginOptions) {
-    fastify.post<{ Body: { id: any, file: any } }>("/files/cover", { schema: coverUploadSchema }, async (request, reply) => {
-        const { id, file } = request.body;
+    fastify.post<{ Body: { id: any, file: any, url: any } }>("/files/cover", { schema: coverUploadSchema }, async (request, reply) => {
+        const { id, file, url } = request.body;
 
         const rawId = id?.value || (typeof id === 'string' ? id : undefined);
+        const rawUrl = url?.value || (typeof url === 'string' ? url : undefined);
         const targetPlaylists = new Set<string>();
 
         if (!rawId) return reply.status(400).send({ error: "Missing ID" });
-        if (!file || !file.filename) return reply.status(400).send({ error: "Missing file" });
+        if (!file && !rawUrl) return reply.status(400).send({ error: "Missing file or URL" });
 
         const checkValue = (val?: string) => val && (val.includes("..") || val.startsWith("/") || val.startsWith("\\"));
         if (checkValue(rawId)) {
@@ -50,10 +52,38 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
             return reply.status(404).send({ error: "No matching audio file found for this ID anywhere" });
         }
 
-        const ext = path.parse(file.filename).ext;
-        const newFilename = `${sanitizeFilename(rawId)}${ext}`;
-        const data = await file.toBuffer();
+        let ext = ".jpg";
+        let data: Buffer;
 
+        if (file && file.filename) {
+            ext = path.parse(file.filename).ext;
+            data = await file.toBuffer();
+        } else if (rawUrl) {
+            try {
+                const response = await fetch(rawUrl);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                // Try to detect extension from URL or content-type
+                const urlParsed = new URL(rawUrl);
+                const detectedExt = path.extname(urlParsed.pathname);
+                if (detectedExt && detectedExt.length > 1) {
+                    ext = detectedExt;
+                } else {
+                    const contentType = response.headers.get('content-type');
+                    if (contentType?.includes('image/png')) ext = '.png';
+                    else if (contentType?.includes('image/webp')) ext = '.webp';
+                    else if (contentType?.includes('image/gif')) ext = '.gif';
+                }
+                
+                data = Buffer.from(await response.arrayBuffer());
+            } catch (error) {
+                return reply.status(400).send({ error: "Failed to download image from URL" });
+            }
+        } else {
+            return reply.status(400).send({ error: "No file or URL provided" });
+        }
+
+        const newFilename = `${sanitizeFilename(rawId)}${ext}`;
         let firstWebPath = "";
 
         for (const playlist of targetPlaylists) {

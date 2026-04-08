@@ -5,7 +5,7 @@ export const coverUploadSchema = {
     consumes: ['multipart/form-data'],
     body: {
         type: 'object',
-        required: ['id', 'file'],
+        required: ['id'],
         properties: {
             id: {
                 type: 'string',
@@ -14,8 +14,16 @@ export const coverUploadSchema = {
             file: {
                 isFile: true,
                 description: 'The image file to upload'
+            },
+            url: {
+                type: 'string',
+                description: 'The URL of the mask image to download'
             }
-        }
+        },
+        anyOf: [
+            { required: ['file'] },
+            { required: ['url'] }
+        ]
     },
     response: {
         200: {
