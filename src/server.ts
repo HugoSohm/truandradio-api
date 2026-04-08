@@ -7,7 +7,7 @@ import downloadRoutes from "./routes/download";
 import searchRoutes from "./routes/search";
 import jobRoutes from "./routes/jobs";
 import filesRoutes from "./routes/files";
-import { setupWorker, connection, downloadQueue } from './services/queue';
+import { setupWorker, connection, downloadQueue, workerConnection } from './services/queue';
 import formbody from '@fastify/formbody';
 import multipart, { ajvFilePlugin } from '@fastify/multipart';
 import { normalizationHook } from './hooks/normalization';
@@ -101,6 +101,7 @@ const start = async () => {
         if (worker) await worker.close();
         await downloadQueue.close();
         await connection.quit();
+        await workerConnection.quit();
     });
 
     const shutdown = async (signal: string) => {

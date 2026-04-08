@@ -29,12 +29,16 @@ export default async function downloadRoutes(app: FastifyInstance) {
                 const parsedArtists = Array.isArray(track.artists) ? track.artists :
                     (typeof track.artists === 'string' ? [track.artists] : undefined);
 
+                const sanitizedTitle = track.title ? track.title.replace(/[\x00-\x1F\x7F]/g, "") : undefined;
+                const sanitizedArtists = parsedArtists && parsedArtists.length > 0 ? 
+                    parsedArtists.map(a => a.replace(/[\x00-\x1F\x7F]/g, "")) : undefined;
+
                 const job = await downloadQueue.add('download', {
                     url: track.url,
                     cookies,
                     overrides: {
-                        title: track.title,
-                        artists: parsedArtists && parsedArtists.length > 0 ? parsedArtists : undefined
+                        title: sanitizedTitle,
+                        artists: sanitizedArtists
                     },
                     playlists: track.playlists
                 });

@@ -4,9 +4,14 @@ import { downloadMedia } from './downloader';
 import logger from '../utils/logger';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-export const connection = new IORedis(REDIS_URL, {
+
+const redisOptions = {
     maxRetriesPerRequest: null,
-});
+};
+
+// Create separate connections for Queue and Worker to avoid interleaved commands
+export const connection = new IORedis(REDIS_URL, redisOptions);
+export const workerConnection = new IORedis(REDIS_URL, redisOptions);
 
 export const downloadQueue = new Queue('downloads', { connection });
 
@@ -14,6 +19,7 @@ export const downloadQueue = new Queue('downloads', { connection });
  * Initializes the worker process for the download queue.
  */
 export const setupWorker = () => {
+    // A Worker MUST have its own connection if the Queue is also active on the same node
     const worker = new Worker('downloads', async (job: Job) => {
         const { url, cookies, overrides, playlists } = job.data;
 
@@ -28,7 +34,10 @@ export const setupWorker = () => {
             logger.error({ module: 'Queue', jobId: job.id, err: error }, `Job failed`);
             throw error;
         }
-    }, { connection, concurrency: 2 });
+    }, { 
+        connection: workerConnection, 
+        concurrency: 2 
+    });
 
     worker.on('completed', job => {
         logger.info({ module: 'Queue', jobId: job.id }, `Job completed`);
