@@ -1,7 +1,7 @@
 {
   "name": "galereradio-api",
   "version": "1.0.0",
-  "description": "Galere radio API",
+  "description": "Truand radio API",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only --exit-child --tree-kill src/server.ts",
     "build": "tsc",
