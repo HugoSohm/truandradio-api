@@ -4,9 +4,9 @@ services:
     container_name: truandradio-api
     environment:
       - PORT=4242
-      - STORAGE_PATH=/app/storage
-      - AUDIO_DOWNLOAD_DIR=/app/storage/music/tracks
-      - COVER_DOWNLOAD_DIR=/app/storage/music/covers
+      - STORAGE_PATH=${STORAGE_PATH:-/app/storage}
+      - AUDIO_DOWNLOAD_DIR=${STORAGE_PATH:-/app/storage}/${AUDIO_DOWNLOAD_DIR:-music/tracks}
+      - COVER_DOWNLOAD_DIR=${STORAGE_PATH:-/app/storage}/${COVER_DOWNLOAD_DIR:-music/covers}
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
       - API_KEY=${API_KEY}
