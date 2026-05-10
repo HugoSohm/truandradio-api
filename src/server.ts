@@ -1,24 +1,24 @@
-import 'dotenv/config';
-import { loggerConfig } from './utils/logger';
-import Fastify from "fastify";
-import healthRoutes from "./routes/health";
-import infoRoutes from "./routes/info";
-import downloadRoutes from "./routes/download";
-import searchRoutes from "./routes/search";
-import jobRoutes from "./routes/jobs";
-import filesRoutes from "./routes/files";
-import playlistsRoutes from "./routes/playlists";
-import { setupWorker, connection, downloadQueue, workerConnection } from './services/queue';
 import formbody from '@fastify/formbody';
 import multipart, { ajvFilePlugin } from '@fastify/multipart';
-import { normalizationHook } from './hooks/normalization';
-import { errorHandler } from './handlers/errorHandler';
-import { authHook } from './handlers/auth';
 import staticPlugin from '@fastify/static';
-import path from 'path';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import Fastify from "fastify";
 import pRetry, { AbortError } from 'p-retry';
+import path from 'path';
+import { authHook } from './handlers/auth';
+import { errorHandler } from './handlers/errorHandler';
+import { normalizationHook } from './hooks/normalization';
+import env from './lib/env';
+import downloadRoutes from "./routes/download";
+import filesRoutes from "./routes/files";
+import healthRoutes from "./routes/health";
+import infoRoutes from "./routes/info";
+import jobRoutes from "./routes/jobs";
+import playlistsRoutes from "./routes/playlists";
+import searchRoutes from "./routes/search";
+import { connection, downloadQueue, setupWorker, workerConnection } from './services/queue';
+import { loggerConfig } from './utils/logger';
 
 const app = Fastify({
     logger: loggerConfig,
@@ -28,10 +28,12 @@ const app = Fastify({
     }
 });
 
+const PORT = env.PORT;
+
 // Intercept all favicon requests natively (including Swagger's embedded ones)
 app.addHook('onRequest', async (request, reply) => {
     if (request.url.includes('favicon.ico') || request.url.includes('favicon-16x16.png') || request.url.includes('favicon-32x32.png')) {
-        return reply.redirect('https://www.truand2lagalere.fr/images/favicon-16x16.png');
+        return reply.redirect('https://www.truandradio.fr/images/favicon-16x16.png');
     }
 });
 
@@ -41,7 +43,7 @@ app.register(multipart, { attachFieldsToBody: true });
 app.register(swagger, {
     openapi: {
         info: {
-            title: 'Galere Radio API',
+            title: 'Truand Radio API',
             description: 'API for retrieving information and downloading media with metadata support.',
             version: '1.1.0'
         },
@@ -71,14 +73,14 @@ app.addHook('preValidation', normalizationHook);
 
 // Serve MP3 files
 app.register(staticPlugin, {
-    root: path.resolve(process.env.MP3_DOWNLOAD_DIR ?? 'mp3'),
+    root: path.resolve(env.AUDIO_DOWNLOAD_DIR),
     prefix: '/mp3/',
-    decorateReply: false // Need to disable decoration to allow multiple registrations
+    decorateReply: false
 });
 
 // Serve Cover files
 app.register(staticPlugin, {
-    root: path.resolve(process.env.COVER_DOWNLOAD_DIR ?? 'cover'),
+    root: path.resolve(env.COVER_DOWNLOAD_DIR),
     prefix: '/cover/',
     decorateReply: false
 });
@@ -92,8 +94,6 @@ app.register(filesRoutes);
 app.register(playlistsRoutes);
 
 app.setErrorHandler(errorHandler);
-
-const PORT = Number(process.env.PORT) || 3000;
 
 const start = async () => {
     let worker: any;
@@ -133,7 +133,7 @@ const start = async () => {
         await pRetry(async () => {
             try {
                 await app.listen({ port: PORT, host: "0.0.0.0" });
-                const displayUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+                const displayUrl = env.BASE_URL || `http://localhost:${PORT}`;
                 app.log.info(`Server running on ${displayUrl}`);
             } catch (err: any) {
                 if (err.code === 'EADDRINUSE') {

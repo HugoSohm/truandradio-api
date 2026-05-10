@@ -26,13 +26,11 @@ COPY --from=builder /app/scripts ./scripts
 ADD https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest /tmp/ytdlp-release.json
 RUN node scripts/setup-ytdlp.js
 
-# Create directories and set permissions
-RUN mkdir -p /app/mp3 /app/cover && chown -R node:node /app
+# Create workdir and set permissions
+RUN chown -R node:node /app
 
 ENV NODE_ENV=production
 ENV PORT=4242
-ENV MP3_DOWNLOAD_DIR=/app/mp3
-ENV COVER_DOWNLOAD_DIR=/app/cover
 
 USER node
 

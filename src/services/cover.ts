@@ -1,12 +1,9 @@
-import { SourceType } from '../types/metadata';
-import { searchSpotifyTrack } from './spotify';
-import { executeYtDlp, YTDLP_PATH } from './yt-dlp';
-import { promisify } from 'util';
 import { execFile } from 'child_process';
-import { parseArtistsTitle } from '../utils/metadata';
+import { promisify } from 'util';
+import { SourceType } from '../types/metadata';
 import logger from '../utils/logger';
-import path from 'path';
-import fs from 'fs';
+import { searchSpotifyTrack } from './spotify';
+import { YTDLP_PATH } from './yt-dlp';
 
 const execFileAsync = promisify(execFile);
 
@@ -68,14 +65,14 @@ export const searchCoverAcrossSources = async (artist: string, title: string): P
  */
 async function searchYtDlpCover(query: string): Promise<string | null> {
     const args = ['--flat-playlist', '--dump-json', '--no-playlist'];
-    
+
     try {
         const { stdout } = await execFileAsync(YTDLP_PATH, [...args, query], { timeout: 30000 });
         if (!stdout.trim()) return null;
 
         const res = JSON.parse(stdout.split('\n')[0]);
         let coverUrl = res.thumbnail || '';
-        
+
         if (!coverUrl && Array.isArray(res.thumbnails) && res.thumbnails.length > 0) {
             // Pick the highest resolution one
             coverUrl = res.thumbnails[res.thumbnails.length - 1].url || '';

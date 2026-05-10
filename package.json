@@ -1,5 +1,5 @@
 {
-  "name": "galereradio-api",
+  "name": "truandradio-api",
   "version": "1.0.0",
   "description": "Truand radio API",
   "scripts": {
@@ -25,7 +25,8 @@
     "ioredis": "^5.9.2",
     "music-metadata": "^11.11.2",
     "p-retry": "^7.1.1",
-    "soundcloud-downloader": "^1.0.0"
+    "soundcloud-downloader": "^1.0.0",
+    "zod": "^4.4.3"
   },
   "overrides": {
     "axios": "^1.7.9"

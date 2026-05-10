@@ -1,3 +1,4 @@
+import env from '../lib/env';
 import { SourceType, TrackMetadata } from '../types/metadata';
 import logger from '../utils/logger';
 
@@ -5,8 +6,8 @@ import logger from '../utils/logger';
  * Retrieves a Spotify access token using client credentials.
  */
 export const getSpotifyAccessToken = async (): Promise<string> => {
-    const clientId = process.env.SPOTIFY_CLIENT_ID;
-    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+    const clientId = env.SPOTIFY_CLIENT_ID;
+    const clientSecret = env.SPOTIFY_CLIENT_SECRET;
 
     if (!clientId || !clientSecret) {
         throw new Error('SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET is missing in .env');

@@ -7,9 +7,10 @@ import { searchCoverAcrossSources } from "../services/cover";
 import { getFilesRecursive } from "../utils/files";
 import { getAudioInfo } from "../utils/metadata";
 import { normalizeForPairing } from "../utils/string";
+import env from "../lib/env";
 import path from "path";
 
-const MP3_DIR = path.resolve(process.env.MP3_DOWNLOAD_DIR ?? 'mp3');
+const AUDIO_DIR = path.resolve(env.AUDIO_DOWNLOAD_DIR);
 
 export default async function searchRoutes(app: FastifyInstance) {
     app.post("/search", {
@@ -57,14 +58,14 @@ export default async function searchRoutes(app: FastifyInstance) {
 
         // Resolve ID to Track Info only if artist or title is missing
         if ((trackArtists.length === 0 || !finalTitle) && id) {
-            const audioFiles = getFilesRecursive(MP3_DIR);
+            const audioFiles = getFilesRecursive(AUDIO_DIR);
             const audioExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"];
             const normalizedTargetId = normalizeForPairing(id);
 
             for (const fileObj of audioFiles) {
                 const ext = path.extname(fileObj.relativePath).toLowerCase();
                 if (audioExtensions.includes(ext)) {
-                    const fullPath = path.join(MP3_DIR, fileObj.relativePath);
+                    const fullPath = path.join(AUDIO_DIR, fileObj.relativePath);
                     const info = await getAudioInfo(fullPath);
                     if (info.id === id || normalizeForPairing(info.id) === normalizedTargetId) {
                         finalTitle = info.title;

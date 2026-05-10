@@ -1,4 +1,4 @@
-# <img src="https://www.truand2lagalere.fr/images/apple-touch-icon.png" width="40" height="40" style="vertical-align: middle;"> Galere Radio API
+# <img src="https://www.truandradio.fr/images/apple-touch-icon.png" width="40" height="40" style="vertical-align: middle;"> Truand Radio API
 
 API for retrieving information, downloading media (queued), and grabbing cover art from various platforms with metadata support.
 

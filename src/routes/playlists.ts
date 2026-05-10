@@ -3,8 +3,10 @@ import fs from "fs";
 import path from "path";
 import { getPlaylistsSchema, createPlaylistSchema, updatePlaylistSchema, deletePlaylistSchema } from "../schemas/playlists";
 
-const MP3_DIR = path.resolve(process.env.MP3_DOWNLOAD_DIR ?? 'mp3');
-const COVER_DIR = path.resolve(process.env.COVER_DOWNLOAD_DIR ?? 'cover');
+import env from "../lib/env";
+
+const AUDIO_DIR = env.AUDIO_DOWNLOAD_DIR;
+const COVER_DIR = env.COVER_DOWNLOAD_DIR;
 
 const KEBAB_CASE_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -17,7 +19,7 @@ function getDirectories(source: string) {
 
 export default async function playlistsRoutes(fastify: FastifyInstance, options: FastifyPluginOptions) {
     fastify.get("/playlists", { schema: getPlaylistsSchema }, async (request, reply) => {
-        const mp3Playlists = getDirectories(MP3_DIR);
+        const mp3Playlists = getDirectories(AUDIO_DIR);
         const coverPlaylists = getDirectories(COVER_DIR);
         const allPlaylists = new Set([...mp3Playlists, ...coverPlaylists]);
         return Array.from(allPlaylists).sort();
@@ -30,7 +32,7 @@ export default async function playlistsRoutes(fastify: FastifyInstance, options:
             return reply.status(400).send({ error: "Playlist name must be in kebab-case (e.g., my-playlist-name)" });
         }
 
-        const mp3Path = path.join(MP3_DIR, name);
+        const mp3Path = path.join(AUDIO_DIR, name);
         const coverPath = path.join(COVER_DIR, name);
 
         let created = false;
@@ -62,9 +64,9 @@ export default async function playlistsRoutes(fastify: FastifyInstance, options:
             return reply.status(400).send({ error: "New name must be different from the old name" });
         }
 
-        const mp3OldPath = path.join(MP3_DIR, name);
+        const mp3OldPath = path.join(AUDIO_DIR, name);
         const coverOldPath = path.join(COVER_DIR, name);
-        const mp3NewPath = path.join(MP3_DIR, newName);
+        const mp3NewPath = path.join(AUDIO_DIR, newName);
         const coverNewPath = path.join(COVER_DIR, newName);
 
         const mp3Exists = fs.existsSync(mp3OldPath);
@@ -91,7 +93,7 @@ export default async function playlistsRoutes(fastify: FastifyInstance, options:
     fastify.delete<{ Params: { name: string } }>("/playlists/:name", { schema: deletePlaylistSchema }, async (request, reply) => {
         const { name } = request.params;
 
-        const mp3Path = path.join(MP3_DIR, name);
+        const mp3Path = path.join(AUDIO_DIR, name);
         const coverPath = path.join(COVER_DIR, name);
 
         const mp3Exists = fs.existsSync(mp3Path);

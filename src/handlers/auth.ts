@@ -1,4 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
+import env from '../lib/env';
 
 export const authHook = async (request: FastifyRequest, reply: FastifyReply) => {
     const publicPaths = [
@@ -10,7 +11,7 @@ export const authHook = async (request: FastifyRequest, reply: FastifyReply) => 
     }
 
     const apiKey = request.headers['x-api-key'];
-    const expectedApiKey = process.env.API_KEY;
+    const expectedApiKey = env.API_KEY;
 
     if (!expectedApiKey) {
         request.log.warn('API_KEY is not set in environment variables. Access granted by default.');

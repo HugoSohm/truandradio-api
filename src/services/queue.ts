@@ -1,9 +1,10 @@
 import { Queue, Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { downloadMedia } from './downloader';
+import env from '../lib/env';
 import logger from '../utils/logger';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const REDIS_URL = env.REDIS_URL;
 
 const redisOptions = {
     maxRetriesPerRequest: null,

@@ -25,7 +25,7 @@ export const getFiles = (dir: string, playlist?: string): { name: string, relati
 export const getFilesRecursive = (dir: string, basePath = ''): { name: string, relativePath: string, playlist: string }[] => {
     let results: { name: string, relativePath: string, playlist: string }[] = [];
     if (!fs.existsSync(dir)) return results;
-    
+
     const list = fs.readdirSync(dir);
     for (const file of list) {
         const fullPath = path.join(dir, file);
@@ -34,8 +34,8 @@ export const getFilesRecursive = (dir: string, basePath = ''): { name: string, r
             const newBasePath = path.join(basePath, file);
             results = results.concat(getFilesRecursive(fullPath, newBasePath));
         } else {
-            results.push({ 
-                name: file, 
+            results.push({
+                name: file,
                 relativePath: path.join(basePath, file).replace(/\\/g, '/'),
                 playlist: basePath.replace(/\\/g, '/') || 'root' // Use 'root' or empty for base dir
             });
@@ -43,3 +43,4 @@ export const getFilesRecursive = (dir: string, basePath = ''): { name: string, r
     }
     return results;
 };
+

@@ -1,14 +1,14 @@
 import { FastifyInstance, FastifyPluginOptions } from "fastify";
 import fs from "fs";
 import path from "path";
+import { coverUploadSchema, deleteFileSchema, getFilesSchema, playlistSyncSchema } from "../schemas/files";
 import { getFilesRecursive } from "../utils/files";
 import { getAudioInfo } from "../utils/metadata";
-import { sanitizeFilename, normalizeForPairing } from "../utils/string";
-import { downloadImage } from "../services/image";
-import { coverUploadSchema, playlistSyncSchema, getFilesSchema, deleteFileSchema } from "../schemas/files";
+import env from "../lib/env";
+import { normalizeForPairing, sanitizeFilename } from "../utils/string";
 
-const MP3_DIR = path.resolve(process.env.MP3_DOWNLOAD_DIR ?? 'mp3');
-const COVER_DIR = path.resolve(process.env.COVER_DOWNLOAD_DIR ?? 'cover');
+const AUDIO_DIR = env.AUDIO_DOWNLOAD_DIR;
+const COVER_DIR = env.COVER_DOWNLOAD_DIR;
 
 export default async function filesRoutes(fastify: FastifyInstance, options: FastifyPluginOptions) {
     fastify.post<{ Body: { id: any, file: any, url: any } }>("/files/cover", { schema: coverUploadSchema }, async (request, reply) => {
@@ -27,16 +27,16 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
         }
 
         const audioExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"];
-        const audioFiles = getFilesRecursive(MP3_DIR);
 
         // Find all playlists where this audio exists
-        const audioResults = await Promise.all(audioFiles.map(async (fileObj) => {
-            const fullPath = path.join(MP3_DIR, fileObj.relativePath);
+        const audioFiles = getFilesRecursive(AUDIO_DIR);
+        const results = await Promise.all(audioFiles.map(async (fileObj) => {
+            const fullPath = path.join(AUDIO_DIR, fileObj.relativePath);
             const ext = path.extname(fileObj.relativePath).toLowerCase();
             if (audioExtensions.includes(ext)) {
                 const { id: idFromTags } = await getAudioInfo(fullPath);
                 if (idFromTags === rawId || normalizeForPairing(idFromTags) === normalizeForPairing(rawId)) {
-                    return { 
+                    return {
                         playlist: fileObj.playlist === 'root' ? '' : fileObj.playlist,
                         originalName: path.parse(fileObj.name).name
                     };
@@ -44,15 +44,14 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
             }
             return null;
         }));
+        const audioResults = results.filter((r): r is { playlist: string, originalName: string } => r !== null);
 
         const originalNames = new Set<string>();
         originalNames.add(rawId);
 
         for (const res of audioResults) {
-            if (res !== null) {
-                targetPlaylists.add(res.playlist);
-                originalNames.add(res.originalName);
-            }
+            targetPlaylists.add(res.playlist);
+            originalNames.add(res.originalName);
         }
 
         if (targetPlaylists.size === 0) {
@@ -69,7 +68,7 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
             try {
                 const response = await fetch(rawUrl);
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                
+
                 // Try to detect extension from URL or content-type
                 const urlParsed = new URL(rawUrl);
                 const detectedExt = path.extname(urlParsed.pathname);
@@ -81,7 +80,7 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
                     else if (contentType?.includes('image/webp')) ext = '.webp';
                     else if (contentType?.includes('image/gif')) ext = '.gif';
                 }
-                
+
                 data = Buffer.from(await response.arrayBuffer());
             } catch (error) {
                 return reply.status(400).send({ error: "Failed to download image from URL" });
@@ -102,7 +101,7 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
             // Remove existing covers for this ID or associated filenames
             const currentCovers = fs.readdirSync(targetCoverDir).filter(f => {
                 const name = path.parse(f).name;
-                return Array.from(originalNames).some(on => 
+                return Array.from(originalNames).some(on =>
                     name === on || normalizeForPairing(name) === normalizeForPairing(on)
                 );
             });
@@ -118,8 +117,8 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
             }
         }
 
-        const PORT = process.env.PORT || 3000;
-        let baseUrl = process.env.BASE_URL;
+        const PORT = env.PORT;
+        let baseUrl = env.BASE_URL;
         if (!baseUrl) {
             baseUrl = `${request.protocol}://${request.hostname}:${PORT}`;
         }
@@ -135,16 +134,17 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
 
     fastify.put<{ Body: { id: string, playlists: string[] } }>("/files/playlists", { schema: playlistSyncSchema }, async (request, reply) => {
         const { id, playlists } = request.body;
+        const targetPlaylists = new Set(playlists.map(p => p.trim()).filter(Boolean));
 
         // Find existing audio sources to copy from
-        const audioFiles = getFilesRecursive(MP3_DIR);
+        const audioFiles = getFilesRecursive(AUDIO_DIR);
         let audioSource: string | null = null;
         let coverSource: string | null = null;
         const currentPlaylists = new Set<string>();
 
         // 1. Locate the audio source globally
         const audioResults = await Promise.all(audioFiles.map(async (fileObj) => {
-            const fullPath = path.join(MP3_DIR, fileObj.relativePath);
+            const fullPath = path.join(AUDIO_DIR, fileObj.relativePath);
             const ext = path.extname(fileObj.relativePath).toLowerCase();
             if ([".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"].includes(ext)) {
                 const { id: idFromTags } = await getAudioInfo(fullPath);
@@ -181,13 +181,11 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
 
         const coverFilename = coverSource ? path.parse(coverSource).base : null;
 
-        const targetPlaylists = new Set(playlists.map(p => p.trim()).filter(Boolean));
-
         // 3. Add to target playlists that don't have it (DO THIS FIRST BEFORE DELETING THE SOURCE)
         for (const p of targetPlaylists) {
             if (!currentPlaylists.has(p)) {
                 // Audio
-                const targetMp3Dir = path.join(MP3_DIR, p);
+                const targetMp3Dir = path.join(AUDIO_DIR, p);
                 if (!fs.existsSync(targetMp3Dir)) fs.mkdirSync(targetMp3Dir, { recursive: true });
                 fs.copyFileSync(audioSource, path.join(targetMp3Dir, audioFilename));
 
@@ -203,7 +201,7 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
         // 4. Delete from playlists not in target (NOW SAFE TO DELETE)
         for (const p of currentPlaylists) {
             if (!targetPlaylists.has(p)) {
-                const audioToRemove = path.join(MP3_DIR, p, audioFilename);
+                const audioToRemove = path.join(AUDIO_DIR, p, audioFilename);
                 try { if (fs.existsSync(audioToRemove)) fs.unlinkSync(audioToRemove); } catch (e) { }
 
                 if (coverFilename) {
@@ -225,30 +223,30 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
         }
 
         const audioExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"];
-        const audioFiles = getFilesRecursive(MP3_DIR);
-        const coverFiles = getFilesRecursive(COVER_DIR);
+        const PORT = env.PORT;
+        let baseUrl = env.BASE_URL;
+        if (!baseUrl) {
+            baseUrl = `${request.protocol}://${request.hostname}:${PORT}`;
+        }
+        if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
 
-        const fileMap = new Map<string, { 
-            id: string, 
-            playlists: Set<string>, 
-            audioUrl?: string, 
+        const fileMap = new Map<string, {
+            id: string,
+            playlists: Set<string>,
+            audioUrl?: string,
             coverUrl?: string,
             title?: string,
             artists?: string[]
         }>();
         const normalizedIndex = new Map<string, string>(); // normalizedKey -> rawId
 
-        const PORT = process.env.PORT || 3000;
-        let baseUrl = process.env.BASE_URL;
-        if (!baseUrl) {
-            baseUrl = `${request.protocol}://${request.hostname}:${PORT}`;
-        }
-        if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+        const audioFiles = getFilesRecursive(AUDIO_DIR);
+        const coverFiles = getFilesRecursive(COVER_DIR);
 
         // 1. Process Audios
         const audioResults = await Promise.all(audioFiles.map(async (fileObj) => {
             const { relativePath, playlist: playlistFolder } = fileObj;
-            const fullPath = path.join(MP3_DIR, relativePath);
+            const fullPath = path.join(AUDIO_DIR, relativePath);
             const parsed = path.parse(relativePath);
             const ext = parsed.ext.toLowerCase();
             const playlistName = playlistFolder === 'root' ? '' : playlistFolder;
@@ -274,53 +272,34 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
                     });
                     normalizedIndex.set(normalizeForPairing(id), id);
                 }
-                
-                // Still index the original filename to the tag-based ID so covers can match if they use the filename
-                // BUT the goal is that covers SHOULD use the tag-based ID too
                 normalizedIndex.set(normalizeForPairing(originalName), id);
-
-                if (playlistName) {
-                    fileMap.get(id)!.playlists.add(playlistName);
-                }
+                if (playlistName) fileMap.get(id)!.playlists.add(playlistName);
             }
         }
 
         // 2. Process Covers
         for (const fileObj of coverFiles) {
-            const { name: file, relativePath, playlist: playlistFolder } = fileObj;
+            const { relativePath, playlist: playlistFolder } = fileObj;
             const parsed = path.parse(relativePath);
             const fileNameOnly = parsed.name;
-            const ext = parsed.ext.toLowerCase();
             const playlistName = playlistFolder === 'root' ? '' : playlistFolder;
+            const matchedRawId = fileMap.has(fileNameOnly) ? fileNameOnly : normalizedIndex.get(normalizeForPairing(fileNameOnly));
 
-            if ([".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext)) {
-                // Determine ID match
-                const matchedRawId = fileMap.has(fileNameOnly) ? fileNameOnly : normalizedIndex.get(normalizeForPairing(fileNameOnly));
-
-                // If cover exists, attach it to the first found or explicitly
-                if (matchedRawId) {
-                    const entry = fileMap.get(matchedRawId)!;
-                    
-                    // We prefer a cover that exactly matches the ID over a filename match
-                    const webPath = `/cover/${relativePath.replace(/\\/g, '/')}`;
-                    const currentUrl = `${baseUrl}${webPath}`;
-
-                    if (!entry.coverUrl || fileNameOnly === matchedRawId) {
-                        entry.coverUrl = currentUrl;
-                    }
-
-                    if (playlistName) {
-                        entry.playlists.add(playlistName);
-                    }
-                } else {
-                    // Orphaned cover
-                    const webPath = `/cover/${relativePath.replace(/\\/g, '/')}`;
-                    fileMap.set(fileNameOnly, {
-                        id: fileNameOnly,
-                        playlists: new Set(playlistName ? [playlistName] : []),
-                        coverUrl: `${baseUrl}${webPath}`
-                    });
+            if (matchedRawId) {
+                const entry = fileMap.get(matchedRawId)!;
+                const webPath = `/cover/${relativePath.replace(/\\/g, '/')}`;
+                const currentUrl = `${baseUrl}${webPath}`;
+                if (!entry.coverUrl || fileNameOnly === matchedRawId) {
+                    entry.coverUrl = currentUrl;
                 }
+                if (playlistName) entry.playlists.add(playlistName);
+            } else {
+                const webPath = `/cover/${relativePath.replace(/\\/g, '/')}`;
+                fileMap.set(fileNameOnly, {
+                    id: fileNameOnly,
+                    playlists: new Set(playlistName ? [playlistName] : []),
+                    coverUrl: `${baseUrl}${webPath}`
+                });
             }
         }
 
@@ -336,12 +315,10 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
         return results;
     });
 
-    // DELETE /files - Delete based on query parameters
     fastify.delete<{ Querystring: { id?: string, type?: string, filename?: string, playlist?: string } }>("/files", { schema: deleteFileSchema }, async (request, reply) => {
         const { id, type, filename } = request.query;
         const queryPlaylist = request.query.playlist;
 
-        // Security check for id, filename, or subPaths
         const targetName = id || filename;
         const checkValue = (val?: string) => val && (val.includes("..") || val.startsWith("/") || val.startsWith("\\"));
 
@@ -349,18 +326,17 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
             return reply.status(400).send({ error: "Invalid ID, filename or playlist" });
         }
 
-        // Case 1: Delete paired files globally across all playlists (or filtered)
         if (id) {
-            const deleted = [];
-            const errors = [];
+            const deleted: string[] = [];
+            const errors: string[] = [];
             const audioExtensions = [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"];
 
-            // Delete Audios
-            const audioFiles = getFilesRecursive(MP3_DIR);
+            // Delete Audios locally
+            const audioFiles = getFilesRecursive(AUDIO_DIR);
             const audioResults = await Promise.all(audioFiles.map(async (fileObj) => {
                 if (queryPlaylist && queryPlaylist !== 'root' && fileObj.playlist !== queryPlaylist) return null;
 
-                const fullPath = path.join(MP3_DIR, fileObj.relativePath);
+                const fullPath = path.join(AUDIO_DIR, fileObj.relativePath);
                 const ext = path.extname(fileObj.relativePath).toLowerCase();
 
                 if (audioExtensions.includes(ext)) {
@@ -383,7 +359,7 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
                 }
             }
 
-            // Delete Covers
+            // Delete Covers locally
             const coverFiles = getFilesRecursive(COVER_DIR);
             for (const fileObj of coverFiles) {
                 if (queryPlaylist && queryPlaylist !== 'root' && fileObj.playlist !== queryPlaylist) continue;
@@ -408,16 +384,15 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
             return { success: true, deleted, errors: errors.length > 0 ? errors : undefined };
         }
 
-        // Case 2: Delete specific raw file (type + filename + optional subPath)
         if (type && filename) {
             let baseDir: string;
             let targetSub: string;
 
             if (type === "mp3" || type === "audio") {
-                baseDir = MP3_DIR;
+                baseDir = path.resolve(env.AUDIO_DOWNLOAD_DIR);
                 targetSub = queryPlaylist || "";
             } else if (type === "cover") {
-                baseDir = COVER_DIR;
+                baseDir = path.resolve(env.COVER_DOWNLOAD_DIR);
                 targetSub = queryPlaylist || "";
             } else {
                 return reply.status(400).send({ error: "Invalid type. Must be 'audio', 'mp3', or 'cover'" });

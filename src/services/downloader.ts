@@ -1,23 +1,25 @@
-import fs from 'fs';
-import path from 'path';
-import { promisify } from 'util';
 import { execFile, spawn } from 'child_process';
-import { Readable, PassThrough } from 'stream';
 import ffmpeg from 'fluent-ffmpeg';
-import scdl from 'soundcloud-downloader';
+import fs from 'fs';
 import pRetry from 'p-retry';
+import path from 'path';
+import scdl from 'soundcloud-downloader';
+import { PassThrough, Readable } from 'stream';
+import { promisify } from 'util';
 
-import { sanitizeFilename } from '../utils/string';
-import { parseArtistsTitle, getSourceFromUrl } from '../utils/metadata';
-import { validateCookies, writeCookiesFile } from '../utils/cookies';
 import { SourceType, TrackMetadata } from '../types/metadata';
 import { DownloadResult } from '../types/responses';
+import { validateCookies, writeCookiesFile } from '../utils/cookies';
+import { getSourceFromUrl, parseArtistsTitle } from '../utils/metadata';
+import { sanitizeFilename } from '../utils/string';
 
+import os from 'os';
+import env from '../lib/env';
+import logger from '../utils/logger';
+import { getDeezerTrackInfo } from './deezer';
 import { downloadImage } from './image';
 import { getSpotifyTrackInfo, searchSpotifyTrack } from './spotify';
-import { getDeezerTrackInfo } from './deezer';
-import { executeYtDlp, YTDLP_PATH, FFMPEG_STATIC_PATH } from './yt-dlp';
-import logger from '../utils/logger';
+import { executeYtDlp, FFMPEG_STATIC_PATH, YTDLP_PATH } from './yt-dlp';
 
 const execFileAsync = promisify(execFile);
 
@@ -25,11 +27,8 @@ if (FFMPEG_STATIC_PATH) {
     ffmpeg.setFfmpegPath(FFMPEG_STATIC_PATH);
 }
 
-const MP3_DIR = path.resolve(process.env.MP3_DOWNLOAD_DIR ?? 'mp3');
-const COVER_DIR = path.resolve(process.env.COVER_DOWNLOAD_DIR ?? 'cover');
 
-if (!fs.existsSync(MP3_DIR)) fs.mkdirSync(MP3_DIR, { recursive: true });
-if (!fs.existsSync(COVER_DIR)) fs.mkdirSync(COVER_DIR, { recursive: true });
+// We no longer need to create local directories as we will use os.tmpdir() for staging.
 
 /**
  * Searches for tracks using yt-dlp.
@@ -232,123 +231,127 @@ export const getTrackInfo = async (url: string, cookies?: any[]): Promise<TrackM
  * Downloads media and covers and processes them with FFmpeg.
  */
 export const downloadMedia = async (url: string, cookies?: any[], overrides?: { title?: string, artists?: string[] }, playlists?: string[]): Promise<DownloadResult> => {
-    const targetMp3Dirs = Array.from(new Set(playlists && playlists.length > 0 ? playlists.map(p => path.join(MP3_DIR, p)) : [MP3_DIR]));
-    const targetCoverDirs = Array.from(new Set(playlists && playlists.length > 0 ? playlists.map(p => path.join(COVER_DIR, p)) : [COVER_DIR]));
+    // We use a temporary directory for the entire process
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'radio-api-'));
 
-    for (const dir of targetMp3Dirs) {
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    }
-    for (const dir of targetCoverDirs) {
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    }
+    try {
+        const metadataResults = await getTrackInfo(url, cookies);
+        if (metadataResults.length === 0) throw new Error('No metadata found for URL');
+        const metadata = metadataResults[0];
 
-    const metadataResults = await getTrackInfo(url, cookies);
-    if (metadataResults.length === 0) throw new Error('No metadata found for URL');
-    const metadata = metadataResults[0];
-
-    if (overrides) {
-        if (overrides.title) metadata.title = overrides.title;
-        if (overrides.artists && overrides.artists.length > 0) metadata.artists = overrides.artists;
-    }
-
-    const artistString = sanitizeFilename(metadata.artists.join(', '));
-    const titleString = sanitizeFilename(metadata.title);
-    const filenameBase = sanitizeFilename(`${titleString}-${artistString}`);
-    
-    const primaryMp3Dir = targetMp3Dirs[0];
-    const primaryCoverDir = targetCoverDirs[0];
-    const audioPath = path.join(primaryMp3Dir, `${filenameBase}.mp3`);
-    const coverPath = path.join(primaryCoverDir, `${filenameBase}.jpg`);
-
-    const tempBasePath = path.join(primaryMp3Dir, `temp-${Date.now()}`);
-    let downloadUrl = url;
-
-    if ([SourceType.SPOTIFY, SourceType.DEEZER, SourceType.APPLE_MUSIC].includes(metadata.source)) {
-        const query = `${metadata.artists.join(' ')} - ${metadata.title}`;
-        logger.info({ module: 'Search' }, `YouTube search for: ${query}`);
-        downloadUrl = `ytsearch1:${query}`;
-    }
-
-    if (metadata.source !== SourceType.SOUNDCLOUD) {
-        const ytdlpArgs = [
-            '-f', 'bestaudio',
-            '--output', `${tempBasePath}.%(ext)s`,
-            '--no-playlist',
-            '--js-runtimes', 'node'
-        ];
-
-        if (FFMPEG_STATIC_PATH) ytdlpArgs.push('--ffmpeg-location', FFMPEG_STATIC_PATH);
-
-        let cookiesFile: string | null = null;
-        if (cookies && cookies.length > 0) {
-            cookiesFile = writeCookiesFile(cookies);
-            ytdlpArgs.push('--cookies', cookiesFile);
+        if (overrides) {
+            if (overrides.title) metadata.title = overrides.title;
+            if (overrides.artists && overrides.artists.length > 0) metadata.artists = overrides.artists;
         }
 
-        try {
-            await pRetry(async () => {
-                await execFileAsync(YTDLP_PATH, [...ytdlpArgs, downloadUrl], { timeout: 300000 });
-            }, { retries: 2 });
+        const artistString = sanitizeFilename(metadata.artists.join(', '));
+        const titleString = sanitizeFilename(metadata.title);
+        const filenameBase = sanitizeFilename(`${titleString}-${artistString}`);
 
-            const files = fs.readdirSync(primaryMp3Dir).filter(f => f.startsWith(`temp-`) && f.includes(tempBasePath.split(path.sep).pop()!));
-            if (files.length === 0) throw new Error('Downloaded audio file not found');
-            const tempAudioPath = path.join(primaryMp3Dir, files[0]);
+        const audioPath = path.join(tempDir, `${filenameBase}.mp3`);
+        const coverPath = path.join(tempDir, `${filenameBase}.jpg`);
 
+        const tempAudioOutputPath = path.join(tempDir, `downloaded-audio`);
+        let downloadUrl = url;
+
+        if ([SourceType.SPOTIFY, SourceType.DEEZER, SourceType.APPLE_MUSIC].includes(metadata.source)) {
+            const query = `${metadata.artists.join(' ')} - ${metadata.title}`;
+            logger.info({ module: 'Search' }, `YouTube search for: ${query}`);
+            downloadUrl = `ytsearch1:${query}`;
+        }
+
+        if (metadata.source !== SourceType.SOUNDCLOUD) {
+            const ytdlpArgs = [
+                '-f', 'bestaudio',
+                '--output', `${tempAudioOutputPath}.%(ext)s`,
+                '--no-playlist',
+                '--js-runtimes', 'node'
+            ];
+
+            if (FFMPEG_STATIC_PATH) ytdlpArgs.push('--ffmpeg-location', FFMPEG_STATIC_PATH);
+
+            let cookiesFile: string | null = null;
+            if (cookies && cookies.length > 0) {
+                cookiesFile = writeCookiesFile(cookies);
+                ytdlpArgs.push('--cookies', cookiesFile);
+            }
+
+            try {
+                await pRetry(async () => {
+                    await execFileAsync(YTDLP_PATH, [...ytdlpArgs, downloadUrl], { timeout: 300000 });
+                }, { retries: 2 });
+
+                const files = fs.readdirSync(tempDir).filter(f => f.startsWith(`downloaded-audio`));
+                if (files.length === 0) throw new Error('Downloaded audio file not found');
+                const tempAudioPath = path.join(tempDir, files[0]);
+
+                await new Promise<void>((resolve, reject) => {
+                    ffmpeg(tempAudioPath)
+                        .audioBitrate(320)
+                        .save(audioPath)
+                        .outputOptions('-metadata', `title=${titleString}`, '-metadata', `artist=${artistString}`)
+                        .on('end', () => resolve())
+                        .on('error', (err) => reject(err));
+                });
+
+                if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
+            } finally {
+                if (cookiesFile && fs.existsSync(cookiesFile)) try { fs.unlinkSync(cookiesFile); } catch (e) { }
+            }
+        } else {
+            const audioStream = await scdl.download(metadata.url || url);
             await new Promise<void>((resolve, reject) => {
-                ffmpeg(tempAudioPath)
+                ffmpeg(audioStream)
                     .audioBitrate(320)
                     .save(audioPath)
                     .outputOptions('-metadata', `title=${titleString}`, '-metadata', `artist=${artistString}`)
                     .on('end', () => resolve())
                     .on('error', (err) => reject(err));
             });
-
-            if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
-        } finally {
-            if (cookiesFile && fs.existsSync(cookiesFile)) try { fs.unlinkSync(cookiesFile); } catch (e) { }
         }
-    } else {
-        const audioStream = await scdl.download(metadata.url || url);
-        await new Promise<void>((resolve, reject) => {
-            ffmpeg(audioStream)
-                .audioBitrate(320)
-                .save(audioPath)
-                .outputOptions('-metadata', `title=${titleString}`, '-metadata', `artist=${artistString}`)
-                .on('end', () => resolve())
-                .on('error', (err) => reject(err));
-        });
-    }
 
-    if (metadata.coverUrl) {
+        if (metadata.coverUrl) {
+            try {
+                await pRetry(() => downloadImage(metadata.coverUrl, coverPath), { retries: 2 });
+            } catch (e) {
+                logger.error({ err: e }, "Failed to download cover");
+            }
+        }
+
+        const playlistsArray = playlists && playlists.length > 0 ? playlists : [''];
+        const mainPlaylist = playlistsArray[0];
+        const relativeAudioPath = mainPlaylist ? `${mainPlaylist}/${path.basename(audioPath)}` : path.basename(audioPath);
+        const relativeCoverPath = mainPlaylist ? `${mainPlaylist}/${path.basename(coverPath)}` : path.basename(coverPath);
+
+        // Save to target directories (S3 mount)
+        for (const p of playlistsArray) {
+            const finalAudioDir = path.join(env.AUDIO_DOWNLOAD_DIR, p);
+            const finalCoverDir = path.join(env.COVER_DOWNLOAD_DIR, p);
+
+            if (!fs.existsSync(finalAudioDir)) fs.mkdirSync(finalAudioDir, { recursive: true });
+            if (!fs.existsSync(finalCoverDir)) fs.mkdirSync(finalCoverDir, { recursive: true });
+
+            fs.copyFileSync(audioPath, path.join(finalAudioDir, path.basename(audioPath)));
+            if (fs.existsSync(coverPath)) {
+                fs.copyFileSync(coverPath, path.join(finalCoverDir, path.basename(coverPath)));
+            }
+        }
+
+        const baseUrl = env.BASE_URL?.replace(/\/$/, '') || '';
+
+        return {
+            audioUrl: `${baseUrl}/mp3/${relativeAudioPath}`,
+            coverUrl: `${baseUrl}/cover/${relativeCoverPath}`,
+            metadata
+        };
+    } finally {
+        // Always clean up the temporary directory
         try {
-            await pRetry(() => downloadImage(metadata.coverUrl, coverPath), { retries: 2 });
+            fs.rmSync(tempDir, { recursive: true, force: true });
         } catch (e) {
-            logger.error({ err: e }, "Failed to download cover");
+            logger.warn({ err: e, path: tempDir }, "Failed to remove temporary download directory");
         }
     }
-
-    for (let i = 1; i < targetMp3Dirs.length; i++) {
-        const destAudioPath = path.join(targetMp3Dirs[i], `${filenameBase}.mp3`);
-        fs.copyFileSync(audioPath, destAudioPath);
-    }
-    
-    if (metadata.coverUrl && fs.existsSync(coverPath)) {
-        for (let i = 1; i < targetCoverDirs.length; i++) {
-            const destCoverPath = path.join(targetCoverDirs[i], `${filenameBase}.jpg`);
-            fs.copyFileSync(coverPath, destCoverPath);
-        }
-    }
-
-    const relativeAudioPath = path.relative(MP3_DIR, audioPath).replace(/\\/g, '/');
-    const relativeCoverPath = path.relative(COVER_DIR, coverPath).replace(/\\/g, '/');
-
-    const baseUrl = process.env.BASE_URL?.replace(/\/$/, '') || '';
-
-    return {
-        audioUrl: `${baseUrl}/mp3/${relativeAudioPath}`,
-        coverUrl: `${baseUrl}/cover/${relativeCoverPath}`,
-        metadata
-    };
 };
 
 /**
