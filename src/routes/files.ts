@@ -7,8 +7,8 @@ import { getAudioInfo } from "../utils/metadata";
 import env from "../lib/env";
 import { normalizeForPairing, sanitizeFilename } from "../utils/string";
 
-const AUDIO_DIR = env.AUDIO_DOWNLOAD_DIR;
-const COVER_DIR = env.COVER_DOWNLOAD_DIR;
+const AUDIO_DIR = path.join(env.STORAGE_PATH, env.AUDIO_DOWNLOAD_DIR);
+const COVER_DIR = path.join(env.STORAGE_PATH, env.COVER_DOWNLOAD_DIR);
 
 export default async function filesRoutes(fastify: FastifyInstance, options: FastifyPluginOptions) {
     fastify.post<{ Body: { id: any, file: any, url: any } }>("/files/cover", { schema: coverUploadSchema }, async (request, reply) => {
@@ -389,10 +389,10 @@ export default async function filesRoutes(fastify: FastifyInstance, options: Fas
             let targetSub: string;
 
             if (type === "mp3" || type === "audio") {
-                baseDir = path.resolve(env.AUDIO_DOWNLOAD_DIR);
+                baseDir = AUDIO_DIR;
                 targetSub = queryPlaylist || "";
             } else if (type === "cover") {
-                baseDir = path.resolve(env.COVER_DOWNLOAD_DIR);
+                baseDir = COVER_DIR;
                 targetSub = queryPlaylist || "";
             } else {
                 return reply.status(400).send({ error: "Invalid type. Must be 'audio', 'mp3', or 'cover'" });

@@ -5,8 +5,8 @@ import { getPlaylistsSchema, createPlaylistSchema, updatePlaylistSchema, deleteP
 
 import env from "../lib/env";
 
-const AUDIO_DIR = env.AUDIO_DOWNLOAD_DIR;
-const COVER_DIR = env.COVER_DOWNLOAD_DIR;
+const AUDIO_DIR = path.join(env.STORAGE_PATH, env.AUDIO_DOWNLOAD_DIR);
+const COVER_DIR = path.join(env.STORAGE_PATH, env.COVER_DOWNLOAD_DIR);
 
 const KEBAB_CASE_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

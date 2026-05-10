@@ -10,7 +10,7 @@ import { normalizeForPairing } from "../utils/string";
 import env from "../lib/env";
 import path from "path";
 
-const AUDIO_DIR = path.resolve(env.AUDIO_DOWNLOAD_DIR);
+const AUDIO_DIR = path.join(env.STORAGE_PATH, env.AUDIO_DOWNLOAD_DIR);
 
 export default async function searchRoutes(app: FastifyInstance) {
     app.post("/search", {

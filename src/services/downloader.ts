@@ -325,8 +325,8 @@ export const downloadMedia = async (url: string, cookies?: any[], overrides?: { 
 
         // Save to target directories (S3 mount)
         for (const p of playlistsArray) {
-            const finalAudioDir = path.join(env.AUDIO_DOWNLOAD_DIR, p);
-            const finalCoverDir = path.join(env.COVER_DOWNLOAD_DIR, p);
+            const finalAudioDir = path.join(env.STORAGE_PATH, env.AUDIO_DOWNLOAD_DIR, p);
+            const finalCoverDir = path.join(env.STORAGE_PATH, env.COVER_DOWNLOAD_DIR, p);
 
             if (!fs.existsSync(finalAudioDir)) fs.mkdirSync(finalAudioDir, { recursive: true });
             if (!fs.existsSync(finalCoverDir)) fs.mkdirSync(finalCoverDir, { recursive: true });

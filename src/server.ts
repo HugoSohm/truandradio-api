@@ -73,14 +73,14 @@ app.addHook('preValidation', normalizationHook);
 
 // Serve MP3 files
 app.register(staticPlugin, {
-    root: path.resolve(env.AUDIO_DOWNLOAD_DIR),
+    root: path.join(env.STORAGE_PATH, env.AUDIO_DOWNLOAD_DIR),
     prefix: '/mp3/',
     decorateReply: false
 });
 
 // Serve Cover files
 app.register(staticPlugin, {
-    root: path.resolve(env.COVER_DOWNLOAD_DIR),
+    root: path.join(env.STORAGE_PATH, env.COVER_DOWNLOAD_DIR),
     prefix: '/cover/',
     decorateReply: false
 });
