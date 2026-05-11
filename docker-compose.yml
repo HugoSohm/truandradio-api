@@ -2,15 +2,9 @@ services:
   api:
     build: .
     container_name: truandradio-api
+    env_file:
+      - .env
     environment:
-      - PORT=4242
-      - STORAGE_PATH=${STORAGE_PATH:-/app/storage}
-      - AUDIO_DOWNLOAD_DIR=${STORAGE_PATH:-/app/storage}/${AUDIO_DOWNLOAD_DIR:-music/tracks}
-      - COVER_DOWNLOAD_DIR=${STORAGE_PATH:-/app/storage}/${COVER_DOWNLOAD_DIR:-music/covers}
-      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
-      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
-      - API_KEY=${API_KEY}
-      - BASE_URL=${BASE_URL}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-mypassword}@redis:6379
     volumes:
       - ${S3_MOUNT_PATH}:/app/storage
