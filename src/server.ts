@@ -23,6 +23,7 @@ import { loggerConfig } from './utils/logger';
 const app = Fastify({
     logger: loggerConfig,
     forceCloseConnections: true,
+    bodyLimit: 300 * 1024 * 1024, // 300MB
     ajv: {
         plugins: [ajvFilePlugin as any]
     }
